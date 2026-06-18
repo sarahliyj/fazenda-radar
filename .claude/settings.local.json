@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(git -C \"/Users/liyijie/Desktop/untitled folder/fazenda_radar\" status)",
+      "Bash(git -C \"/Users/liyijie/Desktop/untitled folder/fazenda_radar\" log --oneline -3)",
+      "Bash(git -C \"/Users/liyijie/Desktop/untitled folder/fazenda_radar\" add dashboard/app.py)",
+      "Bash(git -C '/Users/liyijie/Desktop/untitled folder/fazenda_radar' commit -m ' *)",
+      "Bash(git -C \"/Users/liyijie/Desktop/untitled folder/fazenda_radar\" push)",
+      "Bash(sed -i '' 's/R\\\\$ {:,.1f}/R$ {:,.0f}/g; *)",
+      "Bash(sed -i '' 's/R\\\\$ %,.1f/R$ %,.0f/g; *)",
+      "Bash(grep -n \":.1f\\\\|%,.1f\\\\|{:,.1f\" \"/Users/liyijie/Desktop/untitled folder/fazenda_radar/dashboard/app.py\")",
+      "Bash(python3 -c ' *)",
+      "Bash(.venv/bin/python3 -c ' *)",
+      "Bash(git -C \"/Users/liyijie/Desktop/untitled folder/fazenda_radar\" add data/parse_area.py scrapers/megaleiloes.py scrapers/leilaobrasil.py scrapers/leilaoimovel.py scrapers/grupolance.py scrapers/leiloesjudiciais.py scrapers/leilaovip.py scrapers/superbid.py scrapers/eleiloes.py)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(curl -s \"https://offer-query.superbid.net/seo/offers/?locale=pt_BR&portalId=2,15&requestOrigin=marketplace&timeZoneId=UTC&searchType=opened&urlSeo=https://www.superbid.net/categorias/imoveis/imoveis-rurais&start=0&filter=4500639\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s \"https://offer-query.superbid.net/seo/offers/4500639?locale=pt_BR\")"
+    ]
+  }
+}

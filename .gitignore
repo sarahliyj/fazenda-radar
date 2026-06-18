@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# OS cruft
+.DS_Store
+
+# Local exports / scratch output (not part of the app itself)
+exports/*
+!exports/.gitkeep
+
+# Local user state (per-machine starred lots — should not be shared/committed)
+.fazenda_radar_stars.json
+
+# Streamlit local cache
+.streamlit/secrets.toml

@@ -1,0 +1,21 @@
+# Fazenda Radar — Python dependencies
+# Python 3.9+ required
+
+# Web scraping
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0            # faster HTML parser for bs4
+cloudscraper>=1.2.71   # Cloudflare bypass for leilaoimovel.com.br
+
+# Dashboard
+streamlit>=1.32.0
+
+# Data processing
+pandas>=2.0.0
+
+# Excel export
+openpyxl>=3.1.0
+xlsxwriter>=3.2.0
+
+# JS-heavy site scraping (e-leiloes.com.br)
+playwright>=1.43.0   # after pip install: run `playwright install chromium`
