@@ -205,6 +205,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "csv_starred_mark":     {"pt": "★ Sim",                    "en": "★ Yes"},
     "col_sp_ref":       {"pt": "Referência S&P",           "en": "S&P Reference"},
     "sp_ref_mun":       {"pt": "Município",                "en": "Municipality"},
+    "sp_ref_reg":       {"pt": "Região",                   "en": "Region"},
     "sp_ref_state":     {"pt": "Média estadual (UF)",      "en": "State average (fallback)"},
 
     # ── Lots table ────────────────────────────────────────────────────────────
@@ -587,6 +588,7 @@ def to_excel_listings(df: pd.DataFrame, bench_df: pd.DataFrame) -> bytes:
     }
     sp_ref_labels = {
         "municipio": t("sp_ref_mun"),
+        "regiao":    t("sp_ref_reg"),
         "estado":    t("sp_ref_state"),
     }
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -1240,14 +1242,18 @@ with tab_lots:
         # (the most reliable) are shown first. Stable sort preserves the
         # existing relative order (score, etc.) within each group.
         if "sp_match_level" in disp.columns:
-            _match_priority = {"municipio": 0, "estado": 1}
-            disp["_sort_key"] = disp["sp_match_level"].map(_match_priority).fillna(2)
+            _match_priority = {"municipio": 0, "regiao": 1, "estado": 2}
+            disp["_sort_key"] = disp["sp_match_level"].map(_match_priority).fillna(3)
             disp = disp.sort_values("_sort_key", kind="stable").drop(columns="_sort_key")
 
         # Translate the raw match-level flag ("municipio"/"estado") into a
         # readable label for display — same wording used in the Excel export.
         if "sp_match_level" in disp.columns:
-            _sp_ref_labels = {"municipio": t("sp_ref_mun"), "estado": t("sp_ref_state")}
+            _sp_ref_labels = {
+                "municipio": t("sp_ref_mun"),
+                "regiao":    t("sp_ref_reg"),
+                "estado":    t("sp_ref_state"),
+            }
             disp["sp_match_level"] = disp["sp_match_level"].map(_sp_ref_labels).fillna("")
 
         disp.rename(columns={
@@ -1288,17 +1294,14 @@ with tab_lots:
         # except "Starred" is disabled here, the highlight still paints the
         # whole row visually even though the checkbox cell itself stays plain.
         def _row_style(row):
-            is_starred = bool(row.get(st_col))
-            # "sp_match_level" was renamed/translated into the display column
-            # (spr) above — compare against the translated "estado" label.
-            is_fallback = row.get(spr) == t("sp_ref_state")
-            # Pair each highlight background with an explicit dark text color —
-            # without it, Streamlit's Dark mode keeps its default light text,
-            # which becomes unreadable against these light pastel backgrounds.
+            is_starred  = bool(row.get(st_col))
+            match_label = row.get(spr, "")
             if is_starred:
-                style = "background-color: #d6f5d6; color: #1a1a1a"   # light green
-            elif is_fallback:
-                style = "background-color: #e4e4e4; color: #1a1a1a"   # light grey
+                style = "background-color: #d6f5d6; color: #1a1a1a"   # green  — starred
+            elif match_label == t("sp_ref_state"):
+                style = "background-color: #e4e4e4; color: #1a1a1a"   # grey   — state avg
+            elif match_label == t("sp_ref_reg"):
+                style = "background-color: #fff8e1; color: #1a1a1a"   # yellow — region avg
             else:
                 style = ""
             return [style] * len(row)
@@ -1381,6 +1384,8 @@ with tab_lots:
 
             if top.get("sp_match_level") == "estado":
                 st.caption(t("sp_state_fallback").format(uf=safe(top.get("state"))))
+            elif top.get("sp_match_level") == "regiao":
+                st.caption(f"⚠️ Benchmark regional — município não encontrado na base S&P; usando média da região.")
 
             # ── Per-round date & price ─────────────────────────────────────────
             r1_date = top.get("date_round1_disp") or top.get("date_round1") or "—"
