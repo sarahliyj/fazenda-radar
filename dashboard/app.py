@@ -1237,6 +1237,25 @@ with tab_lots:
         unsafe_allow_html=True,
     )
 
+    # Colour legend
+    st.markdown(
+        """<div style="font-size:0.78rem; display:flex; gap:18px; flex-wrap:wrap; margin-bottom:6px">
+          <span><span style="display:inline-block;width:12px;height:12px;background:#d6f5d6;border:1px solid #aaa;border-radius:2px;vertical-align:middle"></span>&nbsp;"""
+        + ("Salvo / Starred" if st.session_state.get("lang","pt")=="pt" else "Starred")
+        + """</span>
+          <span><span style="display:inline-block;width:12px;height:12px;background:#ffffff;border:1px solid #aaa;border-radius:2px;vertical-align:middle"></span>&nbsp;"""
+        + ("Benchmark: Município (mais preciso)" if st.session_state.get("lang","pt")=="pt" else "Benchmark: Municipality (most precise)")
+        + """</span>
+          <span><span style="display:inline-block;width:12px;height:12px;background:#fff8e1;border:1px solid #aaa;border-radius:2px;vertical-align:middle"></span>&nbsp;"""
+        + ("Benchmark: Região S&P (município não disponível)" if st.session_state.get("lang","pt")=="pt" else "Benchmark: S&P Region avg (municipality not in database)")
+        + """</span>
+          <span><span style="display:inline-block;width:12px;height:12px;background:#e4e4e4;border:1px solid #aaa;border-radius:2px;vertical-align:middle"></span>&nbsp;"""
+        + ("Benchmark: Média estadual (menos preciso)" if st.session_state.get("lang","pt")=="pt" else "Benchmark: State average (least precise)")
+        + """</span>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
     if df.empty:
         st.warning(t("lots_no_match"))
     else:

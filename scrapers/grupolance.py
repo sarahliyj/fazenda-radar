@@ -297,22 +297,37 @@ def _parse_card(card, page_type: str) -> Optional[dict]:
     }
 
 
-def _fetch_appraised_value(url: str) -> Optional[float]:
+def _fetch_detail(url: str) -> tuple[Optional[float], str]:
     """
-    Fetch the detail page and extract 'Valor de avaliação'.
-    Returns None if not found or request fails.
+    Fetch the detail page and return (appraisal_value, description_text).
+
+    Description is the text inside <div class="text-justify"> under "Descrição
+    do lote" — this is where hectare figures appear when they're not in the title.
     """
     html = _fetch(url, timeout=15)
     if not html:
-        return None
-    # Structure: "Valor de avaliação" followed by a span with the R$ value
+        return None, ""
+
+    # Appraisal value
+    appraisal: Optional[float] = None
     m = re.search(
         r"Valor de avalia[cç][aã]o\s*<span[^>]*>\s*(R\$[\s\d.,]+)\s*</span>",
         html, re.IGNORECASE | re.DOTALL,
     )
     if m:
-        return _parse_brl(m.group(1))
-    return None
+        appraisal = _parse_brl(m.group(1))
+
+    # Description text: <div class="text-justify"> under "Descrição do lote"
+    desc_text = ""
+    desc_m = re.search(
+        r'Descri[çc][aã]o do lote.*?<div[^>]*class="[^"]*text-justify[^"]*"[^>]*>(.*?)</div>',
+        html, re.IGNORECASE | re.DOTALL,
+    )
+    if desc_m:
+        raw = desc_m.group(1)
+        desc_text = re.sub(r"<[^>]+>", " ", raw).strip()
+
+    return appraisal, desc_text
 
 
 def _last_page(soup: BeautifulSoup) -> int:
@@ -366,14 +381,23 @@ def _scrape_category(
             key = listing.get("lot_id") or listing.get("listing_url", "")
             if key and key not in seen_ids:
                 seen_ids.add(key)
-                # Fetch detail page for real "Valor de avaliação"
+                # Fetch detail page for appraisal value AND description (for hectares)
                 detail_url = listing.get("listing_url", "")
                 if detail_url:
-                    appraisal = _fetch_appraised_value(detail_url)
+                    appraisal, desc_text = _fetch_detail(detail_url)
                     listing["site_appraised_value"] = appraisal
                     if appraisal is not None:
                         listing["appraised_value"] = appraisal
-                    logger.debug("grupolance: %s appraisal=%s", detail_url, appraisal)
+                    # If hectares not found from title, try description text
+                    if listing.get("hectares") is None and desc_text:
+                        ha, ip = _parse_hectares_wp(desc_text, include_m2=False)
+                        if ha is None:
+                            ha, ip = _parse_hectares_wp(desc_text, include_m2=True)
+                        if ha is not None and ha >= 0.4:
+                            listing["hectares"] = ha
+                            listing["is_partial"] = ip
+                            logger.debug("grupolance: description ha=%.4f for %s", ha, detail_url)
+                    logger.debug("grupolance: %s appraisal=%s ha=%s", detail_url, appraisal, listing.get("hectares"))
                     time.sleep(detail_delay)
                 results.append(listing)
 

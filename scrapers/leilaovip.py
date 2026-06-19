@@ -350,6 +350,37 @@ def _fetch_page(session: requests.Session, page: int = 1) -> Optional[BeautifulS
         return None
 
 
+def _enrich_from_detail(session: requests.Session, listings: list[dict],
+                        delay: float = 0.8) -> None:
+    """Fetch detail pages for listings with hectares=None and fill from description."""
+    missing = [l for l in listings if l.get("hectares") is None]
+    if not missing:
+        return
+    logger.info("leilaovip: enriching %d detail pages for hectares", len(missing))
+
+    for listing in missing:
+        url = listing.get("listing_url", "")
+        if not url:
+            continue
+        import time as _time
+        _time.sleep(delay)
+        try:
+            resp = session.get(url, headers=HEADERS, timeout=20)
+            if resp.status_code != 200:
+                continue
+            soup = BeautifulSoup(resp.text, "html.parser")
+            page_text = soup.get_text(" ", strip=True)
+            ha, ip = _parse_hectares_wp(page_text, include_m2=False)
+            if ha is None:
+                ha, ip = _parse_hectares_wp(page_text, include_m2=True)
+            if ha and ha >= 0.4:
+                listing["hectares"] = ha
+                listing["is_partial"] = ip
+                logger.debug("leilaovip: enriched detail %s → %.4f ha", url, ha)
+        except Exception as exc:
+            logger.debug("leilaovip: detail fetch failed %s: %s", url, exc)
+
+
 def scrape(max_pages: int = 1, delay: float = 1.0, start_page: int = 1,
            **_kwargs) -> list[dict]:
     """
@@ -376,6 +407,9 @@ def scrape(max_pages: int = 1, delay: float = 1.0, start_page: int = 1,
         result = _parse_card(card)
         if result:
             listings.append(result)
+
+    # Enrich listings whose hectares weren't found in the card title
+    _enrich_from_detail(session, listings, delay=delay)
 
     logger.info("leilaovip: %d listings parsed", len(listings))
     return listings
