@@ -294,6 +294,7 @@ def _parse_card(card) -> Optional[dict]:
             "auction_type": auction_type,
             "lot_id": lot_id,
             "source": "leilaovip",
+            "appraised_value": None,
             "date_round1": date_round1,
             "price_round1": price_round1,
             "date_round2": date_round2,
@@ -350,19 +351,25 @@ def _fetch_page(session: requests.Session, page: int = 1) -> Optional[BeautifulS
         return None
 
 
+_AVALIACAO_PAT = re.compile(
+    r"(?:valor\s+de\s+avalia[cç][aã]o|avalia[cç][aã]o)[^\d]{0,30}(R\$\s*[\d.,]+)",
+    re.IGNORECASE,
+)
+
+
 def _enrich_from_detail(session: requests.Session, listings: list[dict],
                         delay: float = 0.8) -> None:
-    """Fetch detail pages for listings with hectares=None and fill from description."""
-    missing = [l for l in listings if l.get("hectares") is None]
-    if not missing:
+    """Fetch detail pages for listings missing hectares or appraised_value."""
+    import time as _time
+    to_fetch = [l for l in listings if l.get("hectares") is None or l.get("appraised_value") is None]
+    if not to_fetch:
         return
-    logger.info("leilaovip: enriching %d detail pages for hectares", len(missing))
+    logger.info("leilaovip: enriching %d detail pages", len(to_fetch))
 
-    for listing in missing:
+    for listing in to_fetch:
         url = listing.get("listing_url", "")
         if not url:
             continue
-        import time as _time
         _time.sleep(delay)
         try:
             resp = session.get(url, headers=HEADERS, timeout=20)
@@ -370,13 +377,28 @@ def _enrich_from_detail(session: requests.Session, listings: list[dict],
                 continue
             soup = BeautifulSoup(resp.text, "html.parser")
             page_text = soup.get_text(" ", strip=True)
-            ha, ip = _parse_hectares_wp(page_text, include_m2=False)
-            if ha is None:
-                ha, ip = _parse_hectares_wp(page_text, include_m2=True)
-            if ha and ha >= 0.4:
-                listing["hectares"] = ha
-                listing["is_partial"] = ip
-                logger.debug("leilaovip: enriched detail %s → %.4f ha", url, ha)
+
+            if listing.get("hectares") is None:
+                ha, ip = _parse_hectares_wp(page_text, include_m2=False)
+                if ha is None:
+                    ha, ip = _parse_hectares_wp(page_text, include_m2=True)
+                if ha and ha >= 0.4:
+                    listing["hectares"] = ha
+                    listing["is_partial"] = ip
+                    logger.debug("leilaovip: enriched ha %s → %.4f ha", url, ha)
+
+            if listing.get("appraised_value") is None:
+                av_m = _AVALIACAO_PAT.search(page_text)
+                if av_m:
+                    raw = av_m.group(1).replace("R$", "").strip()
+                    raw = raw.replace(".", "").replace(",", ".")
+                    try:
+                        av = float(raw)
+                        if av > 0:
+                            listing["appraised_value"] = av
+                            logger.debug("leilaovip: enriched appraised %s → %.0f", url, av)
+                    except ValueError:
+                        pass
         except Exception as exc:
             logger.debug("leilaovip: detail fetch failed %s: %s", url, exc)
 

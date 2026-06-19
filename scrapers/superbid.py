@@ -236,6 +236,8 @@ def _parse_offer(offer: dict) -> Optional[dict]:
         # judicialPraca: 1 = 1ª Praça, 2 = 2ª Praça, None = Praça Única (treat as 1)
         judicial_praca = auction.get("judicialPraca")
         active_round: Optional[int] = int(judicial_praca) if judicial_praca else 1
+        # If active round is 2 we know there are at least 2 rounds; otherwise minimum 1.
+        total_rounds: int = max(active_round or 1, 1)
 
         return {
             "property_name": property_name,
@@ -254,7 +256,7 @@ def _parse_offer(offer: dict) -> Optional[dict]:
             "date_round2": auction_date,
             "price_round2": auction_price,
             "active_round": active_round,
-            "total_rounds": None,
+            "total_rounds": total_rounds,
             "is_partial": is_partial,
         }
 

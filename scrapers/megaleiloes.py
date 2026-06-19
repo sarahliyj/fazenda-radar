@@ -338,7 +338,7 @@ def _parse_listing(card) -> Optional[dict]:
             "auction_type": auction_type,
             "lot_id": lot_id,
             "source": "megaleiloes",
-            "appraised_value": price_round1,   # 1st praça ≈ appraised value
+            "appraised_value": price_round1,
             "date_round1": date_round1,
             "price_round1": price_round1,
             "date_round2": date_round2,
@@ -363,18 +363,24 @@ def _fetch_page(session: requests.Session) -> Optional[BeautifulSoup]:
         return None
 
 
+_AVALIACAO_PAT = re.compile(
+    r"(?:valor\s+de\s+avalia[cç][aã]o|avalia[cç][aã]o)[^\d]{0,30}(R\$\s*[\d.,]+)",
+    re.IGNORECASE,
+)
+
+
 def _enrich_from_detail(
     session: requests.Session,
     listings: list[dict],
     delay: float,
 ) -> None:
-    """Fetch detail pages for listings missing hectares and fill them in-place."""
-    missing = [l for l in listings if l.get("hectares") is None]
-    if not missing:
+    """Fetch detail pages for listings missing hectares or appraised_value."""
+    to_fetch = [l for l in listings if l.get("hectares") is None or l.get("appraised_value") == l.get("price_round1")]
+    if not to_fetch:
         return
-    logger.info("megaleiloes: enriching %d detail pages for hectares", len(missing))
+    logger.info("megaleiloes: enriching %d detail pages", len(to_fetch))
 
-    for listing in missing:
+    for listing in to_fetch:
         url = listing.get("listing_url", "")
         if not url:
             continue
@@ -386,7 +392,7 @@ def _enrich_from_detail(
             try:
                 resp = session.get(url, headers=HEADERS, timeout=25)
                 if resp.status_code in (404, 410):
-                    break  # page gone, no point retrying
+                    break
                 if resp.status_code != 200:
                     logger.debug("megaleiloes detail %d on attempt %d: %s", resp.status_code, attempt + 1, url)
                     continue
@@ -400,11 +406,23 @@ def _enrich_from_detail(
 
         soup = BeautifulSoup(text, "html.parser")
         page_text = soup.get_text(" ", strip=True)
-        ha, is_partial = _parse_hectares_wp(page_text)
-        if ha:
-            listing["hectares"] = ha
-            listing["is_partial"] = is_partial
-            logger.debug("megaleiloes enriched detail %s → %.4f ha", url, ha)
+
+        if listing.get("hectares") is None:
+            ha, is_partial = _parse_hectares_wp(page_text)
+            if ha:
+                listing["hectares"] = ha
+                listing["is_partial"] = is_partial
+                logger.debug("megaleiloes enriched ha %s → %.4f ha", url, ha)
+
+        # Try to find a real appraised value ("Valor de avaliação") on the detail page
+        av_m = _AVALIACAO_PAT.search(page_text)
+        if av_m:
+            from data.parse_area import normalise_number
+            raw = av_m.group(1).replace("R$", "").strip()
+            av = normalise_number(raw)
+            if av and av > 0:
+                listing["appraised_value"] = av
+                logger.debug("megaleiloes enriched appraised_value %s → %.0f", url, av)
 
 
 def _detect_listing_cards(soup: BeautifulSoup) -> list:

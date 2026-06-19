@@ -113,30 +113,30 @@ def _parse_lot_block(block: str, url: str) -> Optional[dict]:
     """
     Parse a rendered lot card text block into a listing dict.
 
-    Expected block format (from page.inner_text on each card):
-        Terreno rural, área de 3,9545 hectares - Sítio Santa Terezinha - Piedade/SP
-        Piedade - SP
-        Lote 12 |
-        IDE 33084
-        Valor avaliado: R$ 900.000,00
-        40%
-        Leilão Único: R$ 540.000,00
-        Aberto para Lances
+    Card text lines (confirmed format):
+        <property name>
+        <City - UF>
+        Lote N |
+        IDE NNNNN
+        Valor avaliado: R$ X
+        DD%
+        [1ª Praça: R$ X  OR  Leilão Único: R$ X]
+        [DD/MM/YYYY]
+        [2ª Praça: R$ X]
+        [DD/MM/YYYY]
+        Aberto para Lances / Encerrado
     """
     lines = [l.strip() for l in block.strip().splitlines() if l.strip()]
     if len(lines) < 2:
         return None
 
     try:
-        # Line 0: property name (title)
         property_name = lines[0]
 
-        # Line 1: location "Cidade - UF"
         location_line = lines[1] if len(lines) > 1 else ""
         uf = _extract_uf(location_line)
         city = _extract_city(location_line, uf)
 
-        # Lot number and IDE
         lot_number = ""
         ide = ""
         auction_type = ""
@@ -145,62 +145,97 @@ def _parse_lot_block(block: str, url: str) -> Optional[dict]:
                 lot_number = line.split("|")[0].strip()
             if re.match(r"IDE\s+\d+", line, re.I):
                 ide = re.search(r"\d+", line).group()
-            if re.search(r"judicial|extrajudicial|venda\s+direta|leilão\s+único|online", line, re.I):
-                if re.search(r"extrajudicial", line, re.I):
-                    auction_type = "Extrajudicial"
-                elif re.search(r"judicial", line, re.I):
-                    auction_type = "Judicial"
-                elif re.search(r"venda\s+direta", line, re.I):
-                    auction_type = "Venda Direta"
+            if re.search(r"extrajudicial", line, re.I):
+                auction_type = "Extrajudicial"
+            elif re.search(r"\bjudicial\b", line, re.I) and not auction_type:
+                auction_type = "Judicial"
+            elif re.search(r"venda\s+direta", line, re.I) and not auction_type:
+                auction_type = "Venda Direta"
 
         lot_id = f"IDE-{ide}" if ide else lot_number
 
-        # Prices
-        appraised_value = None
-        auction_price = None
-        discount_pct = None
-        for line in lines:
+        # Per-round price + date extraction.
+        # Scan lines; when we hit a round label line save its price, then
+        # look at the very next line for a date.
+        appraised_value: Optional[float] = None
+        discount_pct: Optional[float] = None
+        price_round1: Optional[float] = None
+        price_round2: Optional[float] = None
+        date_round1 = ""
+        date_round2 = ""
+        total_rounds = 0
+
+        _R1 = re.compile(r"(?:1[aª]\s*pra[çc]a|leil[aã]o\s+[úu]nico)", re.I)
+        _R2 = re.compile(r"2[aª]\s*pra[çc]a", re.I)
+
+        for i, line in enumerate(lines):
             if re.search(r"valor\s+avaliado", line, re.I):
                 appraised_value = _parse_brl(line)
-            elif re.search(r"leilão\s+único|1[aª]\s*praça|2[aª]\s*praça|lance\s+mínimo", line, re.I):
-                p = _parse_brl(line)
-                if p and (auction_price is None or p < auction_price):
-                    auction_price = p  # take the lowest praça price
             elif re.match(r"\d+%$", line):
                 try:
                     discount_pct = float(line.replace("%", ""))
                 except ValueError:
                     pass
+            elif _R1.search(line):
+                price_round1 = _parse_brl(line)
+                total_rounds = max(total_rounds, 1)
+                if i + 1 < len(lines):
+                    date_round1 = _parse_date_iso(lines[i + 1]) or ""
+            elif _R2.search(line):
+                price_round2 = _parse_brl(line)
+                total_rounds = max(total_rounds, 2)
+                if i + 1 < len(lines):
+                    date_round2 = _parse_date_iso(lines[i + 1]) or ""
 
-        # Fallback: if no labelled price found, take the first R$ amount that isn't appraised
+        total_rounds = total_rounds or None
+
+        # Active round: whichever round's date is today or in the future.
+        today = _parse_date_iso(re.sub(r"\D", "/", __import__("datetime").date.today().strftime("%d/%m/%Y"))) or ""
+        active_round: Optional[int] = None
+        if date_round1 and date_round1 >= today:
+            active_round = 1
+        elif date_round2 and date_round2 >= today:
+            active_round = 2
+        elif date_round2:
+            active_round = 2
+        elif date_round1:
+            active_round = 1
+
+        # Canonical auction_date and auction_price for the active round
+        if active_round == 2:
+            auction_date = date_round2
+            auction_price = price_round2
+        else:
+            auction_date = date_round1
+            auction_price = price_round1
+
+        # Fallback price if no labelled round found
         if auction_price is None:
             for line in lines:
                 p = _parse_brl(line)
                 if p and p != appraised_value:
                     auction_price = p
                     break
+        if not auction_date:
+            full_text = " ".join(lines)
+            auction_date = _parse_date_iso(full_text) or ""
 
-        # Hectares: ha/km² first across all lines, then m² as last resort
+        # Hectares: title (no m²) → all card lines (no m²) → title (m²) → card lines (m²)
         hectares, is_partial = _parse_hectares_wp(property_name, include_m2=False)
         if hectares is None:
             for line in lines:
                 hectares, is_partial = _parse_hectares_wp(line, include_m2=False)
                 if hectares:
                     break
-        if hectares is None:  # m² fallback
+        if hectares is None:
             hectares, is_partial = _parse_hectares_wp(property_name, include_m2=True)
-            if hectares is None:
-                for line in lines:
-                    hectares, is_partial = _parse_hectares_wp(line, include_m2=True)
-                    if hectares:
-                        break
+        if hectares is None:
+            for line in lines:
+                hectares, is_partial = _parse_hectares_wp(line, include_m2=True)
+                if hectares:
+                    break
         if hectares is not None and hectares < 0.4:
             return None
-
-        # Date — look for any date in the block
-        auction_date = ""
-        full_text = " ".join(lines)
-        auction_date = _parse_date_iso(full_text) or ""
 
         return {
             "property_name": property_name,
@@ -217,6 +252,12 @@ def _parse_lot_block(block: str, url: str) -> Optional[dict]:
             "ide": ide,
             "source": "e-leiloes",
             "is_partial": is_partial,
+            "price_round1": price_round1,
+            "price_round2": price_round2,
+            "date_round1": date_round1,
+            "date_round2": date_round2,
+            "active_round": active_round,
+            "total_rounds": total_rounds,
         }
 
     except Exception as exc:
@@ -341,6 +382,49 @@ async def _scrape_category_async(
     return listings
 
 
+def _enrich_from_detail(listings: list[dict], delay: float = 1.0) -> None:
+    """Fetch detail pages for listings with hectares=None using requests (not Playwright)."""
+    import time as _time
+    import requests as _req
+
+    missing = [l for l in listings if l.get("hectares") is None]
+    if not missing:
+        return
+    logger.info("e-leiloes: enriching %d detail pages for hectares", len(missing))
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "pt-BR,pt;q=0.9",
+    }
+    session = _req.Session()
+
+    for listing in missing:
+        url = listing.get("listing_url", "")
+        if not url:
+            continue
+        _time.sleep(delay)
+        try:
+            resp = session.get(url, headers=headers, timeout=20)
+            if resp.status_code != 200:
+                continue
+            # e-leiloes detail pages are server-rendered (SSR via Nuxt)
+            from bs4 import BeautifulSoup as _BS
+            soup = _BS(resp.text, "html.parser")
+            page_text = soup.get_text(" ", strip=True)
+            ha, ip = _parse_hectares_wp(page_text, include_m2=False)
+            if ha is None:
+                ha, ip = _parse_hectares_wp(page_text, include_m2=True)
+            if ha and ha >= 0.4:
+                listing["hectares"] = ha
+                listing["is_partial"] = ip
+                logger.debug("e-leiloes: enriched ha %s → %.4f ha", url, ha)
+        except Exception as exc:
+            logger.debug("e-leiloes: detail fetch failed %s: %s", url, exc)
+
+
 def scrape(max_pages: int = 10, delay: float = 2.0) -> list[dict]:
     """
     Scrape rural property lots from e-leiloes.com.br.
@@ -375,6 +459,7 @@ def scrape(max_pages: int = 10, delay: float = 2.0) -> list[dict]:
                 seen_ids.add(dedup_key)
                 all_listings.append(listing)
 
+    _enrich_from_detail(all_listings, delay=1.0)
     logger.info("e-leiloes: total unique rural lots scraped: %d", len(all_listings))
     return all_listings
 
