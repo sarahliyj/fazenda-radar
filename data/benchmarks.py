@@ -222,11 +222,17 @@ def detect_land_type(text: str) -> str:
     """
     Infer land type from property name or description.
     Returns one of the BENCHMARKS keys, defaulting to 'misto'.
+    Uses word-boundary matching to avoid false positives from city/place
+    names (e.g. "Laranjal Paulista" must not trigger 'laranja' → fruticultura).
     """
-    text_lower = text.lower()
+    import re
+    import unicodedata
+    norm = unicodedata.normalize("NFD", text).encode("ascii", "ignore").decode().lower()
     for ltype, keywords in _TYPE_KEYWORDS.items():
-        if any(kw in text_lower for kw in keywords):
-            return ltype
+        for kw in keywords:
+            kw_norm = unicodedata.normalize("NFD", kw).encode("ascii", "ignore").decode().lower()
+            if re.search(r"\b" + re.escape(kw_norm) + r"\b", norm):
+                return ltype
     return "misto"
 
 
