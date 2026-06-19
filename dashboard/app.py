@@ -38,6 +38,7 @@ from data.benchmarks import BENCHMARKS, _ALL_TYPES as ALL_LAND_TYPES, benchmarks
 from data.sp_reference import sp_reference_table
 from data.apify_enricher import enrich_hectares
 from data.scorer import score_all
+from data.seen_store import load_seen, save_seen, mark_new
 
 try:
     from scrapers.eleiloes import scrape as scrape_eleiloes
@@ -221,6 +222,10 @@ STRINGS: dict[str, dict[str, str]] = {
     "col_hectares":         {"pt": "Hectares",                "en": "Hectares"},
     "col_starred":          {"pt": "Salvo",                   "en": "Starred"},
     "filter_starred":       {"pt": "Apenas salvos",           "en": "Starred only"},
+    "filter_new":           {"pt": "Novos apenas",            "en": "New only"},
+    "col_new":              {"pt": "Novo",                    "en": "New"},
+    "save_baseline_btn":    {"pt": "Salvar como referência",  "en": "Save as baseline"},
+    "save_baseline_ok":     {"pt": "Referência salva.",       "en": "Baseline saved."},
     "col_auction_price":    {"pt": "Preço Leilão",            "en": "Auction Price"},
     "col_price_ha":         {"pt": "R$/ha Leilão",            "en": "R$/ha Auction"},
     "col_market_val":       {"pt": "Val. Mercado",            "en": "Market Value"},
@@ -458,6 +463,8 @@ if "all_listings" not in st.session_state:
     st.session_state.all_listings = []
 if "sources_exhausted" not in st.session_state:
     st.session_state.sources_exhausted = False
+if "seen_store" not in st.session_state:
+    st.session_state.seen_store: dict[str, str] = load_seen()
 
 # Initialise checkbox states on first load so widgets render correctly from the start
 _all_src_keys = ["sbid", "lj", "lim", "mega", "gl", "lb", "lvip"]
@@ -523,7 +530,7 @@ def build_df(listings: list[dict]) -> pd.DataFrame:
         "date_round1", "price_round1", "date_round2", "price_round2",
         "price_per_ha_round1", "discount_round1_pct",
         "price_per_ha_round2", "discount_round2_pct",
-        "site_appraised_value", "is_partial",
+        "site_appraised_value", "is_partial", "is_new",
     ]:
         if col not in df.columns:
             df[col] = None
@@ -743,6 +750,11 @@ with st.sidebar:
     if st.session_state.get("sources_exhausted"):
         st.caption(t("no_more_results"))
 
+    if st.session_state.all_listings:
+        if st.button(t("save_baseline_btn"), use_container_width=True, key="save_baseline_btn"):
+            save_seen(st.session_state.seen_store)
+            st.toast(t("save_baseline_ok"), icon="✅")
+
     st.divider()
 
 
@@ -887,6 +899,7 @@ def _run_batch(multiplier: int, active_sources: list[str],
                 st.toast(f"Apify: {apify_exc}", icon="⚠️")
 
     scored_new = score_all(new_raw)
+    scored_new, st.session_state.seen_store = mark_new(scored_new, st.session_state.seen_store)
     st.session_state.all_listings.extend(scored_new)
     st.session_state.listings = st.session_state.all_listings
     st.session_state.last_scraped = datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -1052,13 +1065,15 @@ with tab_lots:
         else:
             ha_range = (0.0, 0.0)
 
-    fc8, fc9, fc10 = st.columns(3)
+    fc8, fc9, fc10, fc11 = st.columns(4)
     with fc8:
         date_from = st.date_input(t("filter_date_from"), value=None, key="lot_date_from")
     with fc9:
         date_to = st.date_input(t("filter_date_to"), value=None, key="lot_date_to")
     with fc10:
         only_starred = st.checkbox(t("filter_starred"), value=False, key="lot_only_starred")
+    with fc11:
+        only_new = st.checkbox(t("filter_new"), value=False, key="lot_only_new")
 
     # ── Sort & Group ──────────────────────────────────────────────────────────
     st.markdown(f'<h3 class="section">{t("sort_group_header")}</h3>', unsafe_allow_html=True)
@@ -1105,6 +1120,8 @@ with tab_lots:
         df = df[df["auction_date"].isna() | (df["auction_date"] <= str(date_to))]
     if only_starred:
         df = df[df["starred"] == True]
+    if only_new:
+        df = df[df["is_new"] == True]
 
     ascending = sort_asc == t("sort_asc")
     if sort_by in df.columns:
@@ -1224,7 +1241,7 @@ with tab_lots:
         st.warning(t("lots_no_match"))
     else:
         disp_cols = [
-            "starred",
+            "starred", "is_new",
             "property_name", "state", "city", "land_type",
             "auction_date", "hectares", "is_partial",
             "round_display",
@@ -1258,6 +1275,7 @@ with tab_lots:
 
         disp.rename(columns={
             "starred": t("col_starred"),
+            "is_new": t("col_new"),
             "property_name": t("col_property"), "state": t("col_uf"),
             "city": t("col_city"), "land_type": t("col_land_type_short"),
             "round_display": t("col_round"),
@@ -1277,6 +1295,7 @@ with tab_lots:
         }, inplace=True)
 
         st_col = t("col_starred")
+        nw   = t("col_new")
         pr   = t("col_property")
         uf   = t("col_uf");    ci  = t("col_city");  lt = t("col_land_type_short")
         rd   = t("col_round")
@@ -1312,6 +1331,7 @@ with tab_lots:
             styled_disp, use_container_width=True, hide_index=True, height=520,
             column_config={
                 st_col: st.column_config.CheckboxColumn(st_col, width=50),
+                nw:    st.column_config.CheckboxColumn(nw, width=50, disabled=True),
                 pr:    st.column_config.TextColumn(pr, width="large"),
                 uf:    st.column_config.TextColumn(uf, width=55),
                 ci:    st.column_config.TextColumn(ci, width="small"),
@@ -1333,7 +1353,7 @@ with tab_lots:
                 ur:    st.column_config.LinkColumn(ur, width=80),
                 "lot_id": None,
             },
-            disabled=[c for c in disp.columns if c != st_col],
+            disabled=[c for c in disp.columns if c not in (st_col,)],
             key="lots_table",
         )
 
