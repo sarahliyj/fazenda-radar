@@ -823,8 +823,10 @@ def _run_batch(active_sources: list[str], apify_token: str) -> None:
             except Exception as apify_exc:
                 st.toast(f"Apify: {apify_exc}", icon="⚠️")
 
-    # Drop listings where hectares is identified but too small to be relevant
-    new_raw = [l for l in new_raw if l.get("hectares") is None or l["hectares"] >= 0.4]
+    # Drop listings that are too small or whose hectares could not be identified.
+    # A lot is only kept when it has a known area of at least 0.4 ha — applies to
+    # every source, since all listings flow through here before display.
+    new_raw = [l for l in new_raw if l.get("hectares") is not None and l["hectares"] >= 0.4]
 
     if not new_raw:
         return
