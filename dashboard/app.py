@@ -823,9 +823,8 @@ def _run_batch(active_sources: list[str], apify_token: str) -> None:
             except Exception as apify_exc:
                 st.toast(f"Apify: {apify_exc}", icon="⚠️")
 
-    # Drop listings where hectares could not be identified — show nothing rather
-    # than a row with a blank hectare cell (uninformative and clutters the table)
-    new_raw = [l for l in new_raw if l.get("hectares") is not None]
+    # Drop listings where hectares is identified but too small to be relevant
+    new_raw = [l for l in new_raw if l.get("hectares") is None or l["hectares"] >= 0.4]
 
     if not new_raw:
         return
