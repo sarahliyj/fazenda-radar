@@ -38,7 +38,7 @@ from data.benchmarks import BENCHMARKS, _ALL_TYPES as ALL_LAND_TYPES, benchmarks
 from data.sp_reference import sp_reference_table
 from data.apify_enricher import enrich_hectares
 from data.scorer import score_all
-from data.seen_store import load_seen, save_seen, mark_new
+from data.listings_store import load_store, save_store, merge_scrape
 
 try:
     from scrapers.eleiloes import scrape as scrape_eleiloes
@@ -215,10 +215,12 @@ STRINGS: dict[str, dict[str, str]] = {
     "col_hectares":         {"pt": "Hectares",                "en": "Hectares"},
     "col_starred":          {"pt": "Salvo",                   "en": "Starred"},
     "filter_starred":       {"pt": "Apenas salvos",           "en": "Starred only"},
-    "filter_new":           {"pt": "Novos apenas",            "en": "New only"},
-    "col_new":              {"pt": "Novo",                    "en": "New"},
-    "save_baseline_btn":    {"pt": "Salvar como referência",  "en": "Save as baseline"},
-    "save_baseline_ok":     {"pt": "Referência salva.",       "en": "Baseline saved."},
+    "new_lots_header":      {"pt": "🆕 Novos lotes desta busca", "en": "🆕 New lots this search"},
+    "price_changes_header": {"pt": "💰 Atualizações de preço",   "en": "💰 Price updates"},
+    "no_new_lots":          {"pt": "Nenhum lote novo nesta busca.", "en": "No new lots this search."},
+    "no_price_changes":     {"pt": "Nenhuma mudança de preço nesta busca.", "en": "No price changes this search."},
+    "col_old_price":        {"pt": "Preço anterior",          "en": "Previous price"},
+    "col_new_price":        {"pt": "Preço atual",             "en": "Current price"},
     "col_auction_price":    {"pt": "Preço Leilão",            "en": "Auction Price"},
     "col_price_ha":         {"pt": "R$/ha Leilão",            "en": "R$/ha Auction"},
     "col_market_val":       {"pt": "Val. Mercado",            "en": "Market Value"},
@@ -430,8 +432,6 @@ if st.session_state.get("_server_run_id") != _SERVER_RUN_ID:
 # ─────────────────────────────────────────────────────────────────────────────
 # Session state
 # ─────────────────────────────────────────────────────────────────────────────
-if "listings" not in st.session_state:
-    st.session_state.listings: list[dict] = []
 if "last_scraped" not in st.session_state:
     st.session_state.last_scraped: str = ""
 if "scraping" not in st.session_state:
@@ -444,10 +444,16 @@ if "starred" not in st.session_state:
     st.session_state.starred: set[str] = _load_stars()
 if "src_seen_ids" not in st.session_state:
     st.session_state.src_seen_ids = set()
+# Persistent rolling store: {lot_id: listing}. Loaded once per session so the
+# table is repopulated from disk on browser refresh without re-scraping.
+if "listings_store" not in st.session_state:
+    st.session_state.listings_store: dict[str, dict] = load_store()
 if "all_listings" not in st.session_state:
-    st.session_state.all_listings = []
-if "seen_store" not in st.session_state:
-    st.session_state.seen_store: dict[str, str] = load_seen()
+    st.session_state.all_listings = list(st.session_state.listings_store.values())
+if "last_new_lots" not in st.session_state:
+    st.session_state.last_new_lots: list[dict] = []
+if "last_price_changes" not in st.session_state:
+    st.session_state.last_price_changes: list[dict] = []
 
 # Initialise checkbox states on first load so widgets render correctly from the start
 _all_src_keys = ["sbid", "lj", "lim", "mega", "gl", "lb", "lvip"]
@@ -513,7 +519,7 @@ def build_df(listings: list[dict]) -> pd.DataFrame:
         "date_round1", "price_round1", "date_round2", "price_round2",
         "price_per_ha_round1", "discount_round1_pct",
         "price_per_ha_round2", "discount_round2_pct",
-        "site_appraised_value", "is_partial", "is_new",
+        "site_appraised_value", "is_partial",
     ]:
         if col not in df.columns:
             df[col] = None
@@ -715,11 +721,6 @@ with st.sidebar:
         n = len(st.session_state.all_listings)
         st.caption(f"{n} {t('lots_in_memory')}")
 
-    if st.session_state.all_listings:
-        if st.button(t("save_baseline_btn"), use_container_width=True, key="save_baseline_btn"):
-            save_seen(st.session_state.seen_store)
-            st.toast(t("save_baseline_ok"), icon="✅")
-
     st.divider()
 
 
@@ -768,9 +769,12 @@ def _scrape_source(src_key: str, start_page: int, n_pages: int,
 
 
 def _run_batch(active_sources: list[str], apify_token: str) -> None:
-    """Full scrape: fetch all pages from all sources, replace previous results."""
+    """Full scrape: fetch all pages from all sources, then merge into the store.
+
+    Previously-displayed listings are preserved if the scrape yields nothing —
+    the merge only happens once we actually have results.
+    """
     st.session_state.src_seen_ids = set()
-    st.session_state.all_listings = []
     seen_ids: set = st.session_state.src_seen_ids
 
     new_raw: list[dict] = []
@@ -832,14 +836,23 @@ def _run_batch(active_sources: list[str], apify_token: str) -> None:
         return
 
     scored_new = score_all(new_raw)
-    scored_new, st.session_state.seen_store = mark_new(scored_new, st.session_state.seen_store)
-    st.session_state.all_listings.extend(scored_new)
-    st.session_state.listings = st.session_state.all_listings
+
+    # Merge into the persistent rolling store: detect new lots & price changes,
+    # retain previously-seen lots, then auto-save (no manual baseline button).
+    merged, new_lots, price_changes, store = merge_scrape(
+        scored_new, st.session_state.listings_store
+    )
+    st.session_state.listings_store = store
+    save_store(store)
+    st.session_state.all_listings = merged
+    st.session_state.last_new_lots = new_lots
+    st.session_state.last_price_changes = price_changes
     st.session_state.last_scraped = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-    total_displayed = len(build_df(st.session_state.all_listings))
-    st.success(f"+{len(scored_new)} {t('scrape_success')} "
-               f"({total_displayed} total)")
+    st.success(
+        f"{len(new_lots)} novos · {len(price_changes)} atualizações de preço "
+        f"· {len(merged)} total"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -865,7 +878,7 @@ def get_sp_ref_df() -> pd.DataFrame:
 
 bench_df = get_sp_ref_df()
 
-df_all = build_df(st.session_state.listings)
+df_all = build_df(st.session_state.all_listings)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Top-bar: title + Search/Load More button in upper-right
@@ -927,6 +940,57 @@ with tab_lots:
         st.info(t("no_data_info").format(btn=t("scrape_button")), icon="ℹ️")
         st.stop()
 
+    # ── What changed in the last search: new lots + price updates ─────────────
+    _new_lots      = st.session_state.get("last_new_lots", [])
+    _price_changes = st.session_state.get("last_price_changes", [])
+    if _new_lots or _price_changes:
+        _cN, _cP = st.columns(2)
+        with _cN:
+            with st.expander(f"{t('new_lots_header')} ({len(_new_lots)})",
+                             expanded=bool(_new_lots)):
+                if _new_lots:
+                    _ndf = pd.DataFrame([{
+                        t("col_property"): l.get("property_name"),
+                        t("col_uf"):       l.get("state"),
+                        t("col_city"):     l.get("city"),
+                        t("col_hectares"): l.get("hectares"),
+                        t("col_preco_r1"): l.get("auction_price") or l.get("price_round1"),
+                        t("col_url"):      l.get("listing_url"),
+                    } for l in _new_lots])
+                    st.dataframe(
+                        _ndf, use_container_width=True, hide_index=True,
+                        column_config={
+                            t("col_property"): st.column_config.TextColumn(width="large"),
+                            t("col_hectares"): st.column_config.NumberColumn(format="%,.2f ha"),
+                            t("col_preco_r1"): st.column_config.NumberColumn(format="R$ %,.0f"),
+                            t("col_url"):      st.column_config.LinkColumn(width=70),
+                        },
+                    )
+                else:
+                    st.caption(t("no_new_lots"))
+        with _cP:
+            with st.expander(f"{t('price_changes_header')} ({len(_price_changes)})",
+                             expanded=bool(_price_changes)):
+                if _price_changes:
+                    _pdf = pd.DataFrame([{
+                        t("col_property"):    l.get("property_name"),
+                        t("col_uf"):          l.get("state"),
+                        t("col_old_price"):   l.get("old_price"),
+                        t("col_new_price"):   l.get("new_price"),
+                        t("col_url"):         l.get("listing_url"),
+                    } for l in _price_changes])
+                    st.dataframe(
+                        _pdf, use_container_width=True, hide_index=True,
+                        column_config={
+                            t("col_property"):  st.column_config.TextColumn(width="large"),
+                            t("col_old_price"): st.column_config.NumberColumn(format="R$ %,.0f"),
+                            t("col_new_price"): st.column_config.NumberColumn(format="R$ %,.0f"),
+                            t("col_url"):       st.column_config.LinkColumn(width=70),
+                        },
+                    )
+                else:
+                    st.caption(t("no_price_changes"))
+
     # ── Filters ───────────────────────────────────────────────────────────────
     st.markdown(f'<h3 class="section">{t("filters_header")}</h3>', unsafe_allow_html=True)
 
@@ -973,15 +1037,13 @@ with tab_lots:
         else:
             ha_range = (0.0, 0.0)
 
-    fc8, fc9, fc10, fc11 = st.columns(4)
+    fc8, fc9, fc10 = st.columns(3)
     with fc8:
         date_from = st.date_input(t("filter_date_from"), value=None, key="lot_date_from")
     with fc9:
         date_to = st.date_input(t("filter_date_to"), value=None, key="lot_date_to")
     with fc10:
         only_starred = st.checkbox(t("filter_starred"), value=False, key="lot_only_starred")
-    with fc11:
-        only_new = st.checkbox(t("filter_new"), value=False, key="lot_only_new")
 
     # ── Sort & Group ──────────────────────────────────────────────────────────
     st.markdown(f'<h3 class="section">{t("sort_group_header")}</h3>', unsafe_allow_html=True)
@@ -1028,8 +1090,6 @@ with tab_lots:
         df = df[df["auction_date"].isna() | (df["auction_date"] <= str(date_to))]
     if only_starred:
         df = df[df["starred"] == True]
-    if only_new:
-        df = df[df["is_new"] == True]
 
     ascending = sort_asc == t("sort_asc")
     if sort_by in df.columns:
@@ -1168,7 +1228,7 @@ with tab_lots:
         st.warning(t("lots_no_match"))
     else:
         disp_cols = [
-            "starred", "is_new",
+            "starred",
             "property_name", "state", "city", "land_type",
             "auction_date", "hectares", "is_partial",
             "round_display",
@@ -1202,7 +1262,6 @@ with tab_lots:
 
         disp.rename(columns={
             "starred": t("col_starred"),
-            "is_new": t("col_new"),
             "property_name": t("col_property"), "state": t("col_uf"),
             "city": t("col_city"), "land_type": t("col_land_type_short"),
             "round_display": t("col_round"),
@@ -1222,7 +1281,6 @@ with tab_lots:
         }, inplace=True)
 
         st_col = t("col_starred")
-        nw   = t("col_new")
         pr   = t("col_property")
         uf   = t("col_uf");    ci  = t("col_city");  lt = t("col_land_type_short")
         rd   = t("col_round")
@@ -1258,7 +1316,6 @@ with tab_lots:
             styled_disp, use_container_width=True, hide_index=True, height=520,
             column_config={
                 st_col: st.column_config.CheckboxColumn(st_col, width=50),
-                nw:    st.column_config.CheckboxColumn(nw, width=50, disabled=True),
                 pr:    st.column_config.TextColumn(pr, width="large"),
                 uf:    st.column_config.TextColumn(uf, width=55),
                 ci:    st.column_config.TextColumn(ci, width="small"),

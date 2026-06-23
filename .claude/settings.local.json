@@ -18,7 +18,24 @@
       "Bash(git push *)",
       "Bash(curl -s \"https://offer-query.superbid.net/seo/offers/?locale=pt_BR&portalId=2,15&requestOrigin=marketplace&timeZoneId=UTC&searchType=opened&urlSeo=https://www.superbid.net/categorias/imoveis/imoveis-rurais&start=0&filter=4500639\")",
       "Bash(python3 -m json.tool)",
-      "Bash(curl -s \"https://offer-query.superbid.net/seo/offers/4500639?locale=pt_BR\")"
+      "Bash(curl -s \"https://offer-query.superbid.net/seo/offers/4500639?locale=pt_BR\")",
+      "Bash(python3 -)",
+      "Bash(curl -s --max-time 20 -A \"Mozilla/5.0 \\(Macintosh; Intel Mac OS X 10_15_7\\) AppleWebKit/537.36 Chrome/124 Safari/537.36\" -H \"Accept-Language: pt-BR\" \"https://www.grupolance.com.br/imoveis/imoveis-rurais/sp/oscar-bressane/fazenda-argentina-oscar-bressane-sp-28252\")",
+      "Bash(find /Users/liyijie -name \"bs4\" -type d 2>/dev/null | head -5 *)",
+      "Bash(/opt/anaconda3/bin/python3 -)",
+      "Bash(mkdir -p /private/tmp/claude-501/-Users-liyijie-Desktop-untitled-folder-fazenda_radar/f3457935-85f4-43fa-b8a0-8638bffb998a/scratchpad && ls -la /private/tmp/claude-501/-Users-liyijie-Desktop-untitled-folder-fazenda_radar/f3457935-85f4-43fa-b8a0-8638bffb998a/scratchpad)",
+      "mcp__visualize__read_me",
+      "mcp__visualize__show_widget",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('dashboard/app.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('dashboard/app.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(extract-text \"/Users/liyijie/Desktop/LAND-BRZ25-Brazil_Farmland_Market_Analysis_Ed_117_Jan-Mar_2025_English-Portuguese_tables_last_udpated_on_4-15-25_v2.xlsx\")",
+      "Bash(git checkout *)",
+      "Bash(git rm *)",
+      "Bash(rm -f data/seen_store.py)",
+      "Bash(timeout 40 python3 -m streamlit run dashboard/app.py --server.headless true --server.port 8599)",
+      "Read(//tmp/**)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8599/_stcore/health)",
+      "Bash(pkill -f \"streamlit run dashboard/app.py\")"
     ]
   }
 }
