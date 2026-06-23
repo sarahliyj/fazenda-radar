@@ -55,22 +55,36 @@ def _get_secret(name: str) -> Optional[str]:
 
 
 @lru_cache(maxsize=1)
-def _get_client():
-    """Return a cached Supabase client, or None when not configured."""
+def _client_and_status():
+    """Return (client_or_None, status_reason). Cached for the session."""
     url = _get_secret("SUPABASE_URL")
     key = _get_secret("SUPABASE_KEY")
     if not url or not key:
-        return None
+        missing = [n for n in ("SUPABASE_URL", "SUPABASE_KEY") if not _get_secret(n)]
+        return None, f"credenciais ausentes: {', '.join(missing)}"
     try:
         from supabase import create_client
-        return create_client(url, key)
-    except Exception:
-        return None
+    except Exception as exc:
+        return None, f"pacote supabase não instalado ({exc})"
+    try:
+        return create_client(url, key), "ok"
+    except Exception as exc:
+        return None, f"falha na conexão ({exc})"
+
+
+def _get_client():
+    """Return a cached Supabase client, or None when not configured."""
+    return _client_and_status()[0]
 
 
 def backend_name() -> str:
     """'supabase' when the durable backend is active, else 'local-file'."""
     return "supabase" if _get_client() is not None else "local-file"
+
+
+def backend_reason() -> str:
+    """Why the durable backend is/ isn't active — for diagnostics in the UI."""
+    return _client_and_status()[1]
 
 
 def _price_of(listing: dict) -> Optional[float]:

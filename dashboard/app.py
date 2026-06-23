@@ -38,7 +38,7 @@ from data.benchmarks import BENCHMARKS, _ALL_TYPES as ALL_LAND_TYPES, benchmarks
 from data.sp_reference import sp_reference_table
 from data.apify_enricher import enrich_hectares
 from data.scorer import score_all
-from data.listings_store import load_store, save_store, merge_scrape, backend_name
+from data.listings_store import load_store, save_store, merge_scrape, backend_name, backend_reason
 
 try:
     from scrapers.eleiloes import scrape as scrape_eleiloes
@@ -725,7 +725,7 @@ with st.sidebar:
     if _backend == "supabase":
         st.caption("💾 Armazenamento: Supabase (durável)")
     else:
-        st.caption("💾 Armazenamento: arquivo local (reinicia no redeploy)")
+        st.caption(f"💾 Armazenamento: arquivo local (reinicia no redeploy) — {backend_reason()}")
 
     st.divider()
 
