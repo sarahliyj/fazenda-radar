@@ -26,11 +26,13 @@ One-time setup, ~10 minutes:
 That's the whole schema — one row per lot, the full listing stored as JSON.
 
 ## 3. Get your credentials
-1. Open **Project Settings** (gear icon) → **API**.
+1. Open **Project Settings** (gear icon) → **API** (and **API Keys**).
 2. Copy the **Project URL** (e.g. `https://abcd1234.supabase.co`).
-3. Copy the **`service_role`** key (under *Project API keys*). This key is used
-   server-side only (never sent to the browser), and it bypasses row-level
-   security, so no extra policies are needed.
+3. Copy the **secret key** — `sb_secret_…` (older projects call this the
+   **`service_role`** key). **Not** the publishable / anon key
+   (`sb_publishable_…`): that one is blocked by row-level security and the app
+   won't be able to read or write. The secret key is used server-side only
+   (never sent to the browser) and bypasses RLS, so no extra policies are needed.
 
 ## 4. Add them to the app
 
