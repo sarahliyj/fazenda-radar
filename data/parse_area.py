@@ -42,8 +42,10 @@ _ALQUEIRE_TO_HA = 2.42
 
 # Agrarian notation X,YY,ZZ ha — must be tried BEFORE the general ha pattern
 # to avoid a partial match on just "YY,ZZ ha".
+_HA_UNIT = r"(?:h[aá]s?\.?|hec?tare?s?|alqueire?s?)"
+
 _HA_AGRARIAN = re.compile(
-    r"(\d+)[.,](\d{2})[.,](\d{2})[\s-]*(?:has?\b|hec?tare?s?)",
+    r"(\d+)[.,](\d{2})[.,](\d{2})[\s-]*" + _HA_UNIT,
     re.IGNORECASE,
 )
 
@@ -52,8 +54,7 @@ _HA_AGRARIAN = re.compile(
 # Separator between number and unit: whitespace OR hyphen (URL slugs use hyphens).
 _HA_PAT = re.compile(
     r"([\d]{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|[\d]+(?:[.,]\d+)?)"
-    r"[\s-]*"
-    r"(?:has?\b|hec?tare?s?|alqueire?s?)",
+    r"[\s-]*" + _HA_UNIT,
     re.IGNORECASE,
 )
 
@@ -187,7 +188,7 @@ _PARTIAL_KW = re.compile(
 
 # "ou X ha" — the explicit effective-area figure that follows the percentage
 _PARTIAL_OU_HA = re.compile(
-    r"\bou\s+([\d][,.\d]*)\s*(?:has?\b|hec?tare?s?)",
+    r"\bou\s+([\d][,.\d]*)\s*(?:h[aá]s?\.?|hec?tare?s?)",
     re.IGNORECASE,
 )
 
