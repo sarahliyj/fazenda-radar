@@ -80,11 +80,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "batch_size_help":      {"pt": "Quantidade alvo de lotes por busca, distribuída igualmente entre as fontes ativas.",
                              "en": "Target lots per batch, distributed equally across active sources."},
     "scrape_button":        {"pt": "Buscar Leilões", "en": "Search Auctions"},
-    "load_more_button":     {"pt": "Carregar Mais", "en": "Load More"},
     "last_scraped":         {"pt": "Última coleta:",          "en": "Last scraped:"},
     "lots_in_memory":       {"pt": "lotes carregados",        "en": "lots loaded"},
-    "no_more_results":      {"pt": "Todas as fontes esgotadas — sem mais lotes disponíveis.",
-                             "en": "All sources exhausted — no more lots available."},
     "footer":               {"pt": "Fazenda Radar v3.0\nDados: FNP/INCRA 2024",
                              "en": "Fazenda Radar v3.0\nData: FNP/INCRA 2024"},
     "language_label":       {"pt": "Idioma / Language",       "en": "Idioma / Language"},
@@ -108,10 +105,6 @@ STRINGS: dict[str, dict[str, str]] = {
 
     "scraping_spinner":     {"pt": "Buscando e coletando lotes…",
                              "en": "Searching and fetching lots…"},
-    "batch_multiplier_label": {"pt": "Lotes por busca (multiplicador)",
-                               "en": "Batch size (multiplier)"},
-    "batch_multiplier_help":  {"pt": "1× = ~1 página por fonte. Multiplica o nº de páginas buscadas por fonte a cada clique.",
-                               "en": "1× = ~1 page per source. Multiplies pages fetched per source per click."},
     "apify_label":          {"pt": "Token Apify (opcional)",    "en": "Apify Token (optional)"},
     "apify_help":           {"pt": "Se preenchido, busca hectares faltantes via Apify.",
                              "en": "If set, fetches missing hectares via Apify."},
@@ -433,7 +426,6 @@ _SERVER_RUN_ID = _get_server_run_id()
 if st.session_state.get("_server_run_id") != _SERVER_RUN_ID:
     st.session_state["_server_run_id"] = _SERVER_RUN_ID
     st.session_state["scraping"] = False
-    st.session_state["load_more"] = False
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Session state
@@ -444,25 +436,16 @@ if "last_scraped" not in st.session_state:
     st.session_state.last_scraped: str = ""
 if "scraping" not in st.session_state:
     st.session_state.scraping: bool = False
-if "load_more" not in st.session_state:
-    st.session_state.load_more: bool = False
 if "lang" not in st.session_state:
     st.session_state.lang: str = "pt"
 if "selected_sources" not in st.session_state:
     st.session_state.selected_sources: list[str] = ["sbid", "lj", "lim", "mega", "gl", "lb", "lvip"]
 if "starred" not in st.session_state:
     st.session_state.starred: set[str] = _load_stars()
-# Batch / cursor state
-if "src_cursors" not in st.session_state:
-    # next page to fetch per source key; None = exhausted
-    st.session_state.src_cursors = {}
 if "src_seen_ids" not in st.session_state:
     st.session_state.src_seen_ids = set()
 if "all_listings" not in st.session_state:
-    # Accumulates all listings across batches (pre-filter)
     st.session_state.all_listings = []
-if "sources_exhausted" not in st.session_state:
-    st.session_state.sources_exhausted = False
 if "seen_store" not in st.session_state:
     st.session_state.seen_store: dict[str, str] = load_seen()
 
@@ -675,8 +658,6 @@ with st.sidebar:
 
     st.divider()
 
-    batch_multiplier = 1
-
     # ── Source selector ───────────────────────────────────────────────────────
     st.markdown(f"**{t('sources_label')}**")
 
@@ -722,33 +703,17 @@ with st.sidebar:
         key="apify_token",
     )
 
-    _has_results = bool(st.session_state.all_listings)
-    _btn_label = t("load_more_button") if _has_results else t("scrape_button")
-
-    if st.button(_btn_label, use_container_width=True):
+    if st.button(t("scrape_button"), use_container_width=True):
         if not st.session_state.selected_sources:
             st.warning(t("src_none_warn"))
-        elif _has_results:
-            st.session_state.load_more = True
-            st.rerun()
         else:
             st.session_state.scraping = True
             st.rerun()
-
-    if _has_results:
-        if st.button(t("scrape_button"), use_container_width=True, key="sidebar_fresh_btn"):
-            if not st.session_state.selected_sources:
-                st.warning(t("src_none_warn"))
-            else:
-                st.session_state.scraping = True
-                st.rerun()
 
     if st.session_state.last_scraped:
         st.caption(f"{t('last_scraped')} {st.session_state.last_scraped}")
         n = len(st.session_state.all_listings)
         st.caption(f"{n} {t('lots_in_memory')}")
-    if st.session_state.get("sources_exhausted"):
-        st.caption(t("no_more_results"))
 
     if st.session_state.all_listings:
         if st.button(t("save_baseline_btn"), use_container_width=True, key="save_baseline_btn"):
@@ -772,13 +737,13 @@ with st.sidebar:
 # as any source has pages left.
 
 _BASE_PAGES: dict[str, int] = {
-    "sbid": 4,   # 4 pages × 30 = ~120 rural + 4 pages × 30 = ~108 terrain (per category)
-    "mega": 1,   # single-page source — all ~27 rural lots in one fetch
-    "lb":   1,
-    "lim":  1,
-    "gl":   1,
-    "lj":   1,
-    "lvip": 1,   # single-page source — all ~11 rural lots in one fetch
+    "sbid": 15,  # ~300 rural + ~300 terrain; self-terminates on empty page
+    "mega": 5,
+    "lb":   5,
+    "lim":  5,
+    "gl":   5,
+    "lj":   5,
+    "lvip": 1,   # single-page source
 }
 
 def _scrape_source(src_key: str, start_page: int, n_pages: int,
@@ -802,50 +767,22 @@ def _scrape_source(src_key: str, start_page: int, n_pages: int,
     return []
 
 
-def _run_batch(multiplier: int, active_sources: list[str],
-               apify_token: str, is_fresh: bool) -> None:
-    """
-    Fetch one batch: for each live source, fetch _BASE_PAGES[src] * multiplier
-    pages starting from its cursor, then advance the cursor.
-
-    is_fresh=True  → reset all cursors to page 1 and clear accumulated results.
-    is_fresh=False → continue from each source's stored cursor (Load More).
-
-    A source is marked exhausted only when it returns zero results (real last page).
-    """
-    if is_fresh:
-        st.session_state.src_cursors = {k: 1 for k in active_sources}
-        st.session_state.src_seen_ids = set()
-        st.session_state.all_listings = []
-        st.session_state.sources_exhausted = False
-
-    cursors: dict = st.session_state.src_cursors
-    seen_ids: set  = st.session_state.src_seen_ids
-
-    # Sync cursors: drop removed sources, initialise newly added ones at page 1
-    for k in list(cursors):
-        if k not in active_sources:
-            del cursors[k]
-    for k in active_sources:
-        cursors.setdefault(k, 1)
-
-    live = [k for k in active_sources if cursors.get(k) is not None]
-    if not live:
-        st.session_state.sources_exhausted = True
-        return
+def _run_batch(active_sources: list[str], apify_token: str) -> None:
+    """Full scrape: fetch all pages from all sources, replace previous results."""
+    st.session_state.src_seen_ids = set()
+    st.session_state.all_listings = []
+    seen_ids: set = st.session_state.src_seen_ids
 
     new_raw: list[dict] = []
 
     with st.spinner(t("scraping_spinner")):
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        # Build tasks: {src_key: (start, n_pages)}
         tasks = {
-            src_key: (cursors[src_key], _BASE_PAGES.get(src_key, 1) * multiplier)
-            for src_key in live
+            src_key: (1, _BASE_PAGES.get(src_key, 1))
+            for src_key in active_sources
         }
 
-        # Run all scrapers in parallel
         futures = {}
         with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
             for src_key, (start, n_pages) in tasks.items():
@@ -856,34 +793,22 @@ def _run_batch(multiplier: int, active_sources: list[str],
         results: dict[str, list] = {}
         for future in as_completed(futures):
             src_key = futures[future]
-            start, n_pages = tasks[src_key]
             try:
                 fetched = future.result()
             except Exception as exc:
                 st.toast(f"{src_key}: {exc}", icon="⚠️")
-                cursors[src_key] = None
                 continue
+            if fetched:
+                results[src_key] = fetched
 
-            if not fetched:
-                cursors[src_key] = None
-                continue
-
-            results[src_key] = fetched
-            cursors[src_key] = start + n_pages
-
-        # Deduplicate and merge in stable source order
-        for src_key in live:
+        for src_key in active_sources:
             for item in results.get(src_key, []):
                 key = item.get("lot_id") or item.get("listing_url", "")
                 if key and key not in seen_ids:
                     seen_ids.add(key)
                     new_raw.append(item)
 
-    st.session_state.src_cursors = cursors
     st.session_state.src_seen_ids = seen_ids
-
-    if all(v is None for v in cursors.values()):
-        st.session_state.sources_exhausted = True
 
     if not new_raw:
         return
@@ -918,19 +843,9 @@ _active_srcs = st.session_state.selected_sources
 if st.session_state.scraping:
     st.session_state.scraping = False
     try:
-        _run_batch(batch_multiplier, _active_srcs, _apify_token, is_fresh=True)
+        _run_batch(_active_srcs, _apify_token)
     except Exception as exc:
         st.error(f"{t('scrape_error')} {exc}")
-
-elif st.session_state.load_more:
-    st.session_state.load_more = False
-    if st.session_state.get("sources_exhausted"):
-        st.info(t("no_more_results"))
-    else:
-        try:
-            _run_batch(batch_multiplier, _active_srcs, _apify_token, is_fresh=False)
-        except Exception as exc:
-            st.error(f"{t('scrape_error')} {exc}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -951,27 +866,12 @@ _top_left, _top_right = st.columns([5, 1])
 with _top_left:
     st.markdown("### Fazenda Radar")
 with _top_right:
-    _has_results2 = bool(st.session_state.all_listings)
-    if _has_results2:
-        if st.button(t("load_more_button"), use_container_width=True, key="main_load_more_btn"):
-            if not st.session_state.selected_sources:
-                st.warning(t("src_none_warn"))
-            else:
-                st.session_state.load_more = True
-                st.rerun()
-        if st.button(t("scrape_button"), use_container_width=True, key="main_fresh_btn"):
-            if not st.session_state.selected_sources:
-                st.warning(t("src_none_warn"))
-            else:
-                st.session_state.scraping = True
-                st.rerun()
-    else:
-        if st.button(t("scrape_button"), use_container_width=True, key="main_scrape_btn"):
-            if not st.session_state.selected_sources:
-                st.warning(t("src_none_warn"))
-            else:
-                st.session_state.scraping = True
-                st.rerun()
+    if st.button(t("scrape_button"), use_container_width=True, key="main_scrape_btn"):
+        if not st.session_state.selected_sources:
+            st.warning(t("src_none_warn"))
+        else:
+            st.session_state.scraping = True
+            st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tabs

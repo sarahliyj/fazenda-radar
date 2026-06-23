@@ -241,7 +241,7 @@ def _parse_listing(card) -> Optional[dict]:
 
         # --- Hectares ---
         hectares, is_partial = _parse_hectares_wp(property_name, include_m2=False)
-        if hectares is not None and hectares < 0.4:
+        if hectares is not None and hectares <= 0:
             return None
 
         # --- Auction type ---

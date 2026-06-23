@@ -510,7 +510,7 @@ def _parse_card(
         hectares, is_partial = _parse_hectares_wp(property_name, include_m2=True)
 
     # ── Hectare filters ───────────────────────────────────────────────────────
-    if hectares is not None and hectares < 0.4:
+    if hectares is not None and hectares <= 0:
         return None
     if page_type == "terreno":
         if hectares is None or hectares < _MIN_HA_TERRENO:

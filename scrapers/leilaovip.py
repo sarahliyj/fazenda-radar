@@ -382,7 +382,7 @@ def _enrich_from_detail(session: requests.Session, listings: list[dict],
                 ha, ip = _parse_hectares_wp(page_text, include_m2=False)
                 if ha is None:
                     ha, ip = _parse_hectares_wp(page_text, include_m2=True)
-                if ha and ha >= 0.4:
+                if ha and ha > 0:
                     listing["hectares"] = ha
                     listing["is_partial"] = ip
                     logger.debug("leilaovip: enriched ha %s → %.4f ha", url, ha)

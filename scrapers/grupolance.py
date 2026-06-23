@@ -197,7 +197,7 @@ def _parse_card(card, page_type: str) -> Optional[dict]:
     hectares, is_partial = _parse_hectares_wp(property_name, include_m2=False)
     if hectares is None:  # m² in title as last resort (no description available)
         hectares, is_partial = _parse_hectares_wp(property_name, include_m2=True)
-    if hectares is not None and hectares < 0.4:
+    if hectares is not None and hectares <= 0:
         return None
 
     # ── Round data from div.card-dates ────────────────────────────────────────
@@ -317,6 +317,13 @@ def _fetch_detail(url: str) -> tuple[Optional[float], str]:
     if m:
         appraisal = _parse_brl(m.group(1))
 
+    # Page heading (h1) — often contains full title with area ("Área Total de 12.000m²")
+    # that the search-result card title omits
+    heading_text = ""
+    h1_m = re.search(r"<h1[^>]*>(.*?)</h1>", html, re.IGNORECASE | re.DOTALL)
+    if h1_m:
+        heading_text = re.sub(r"<[^>]+>", " ", h1_m.group(1)).strip()
+
     # Description text: <div class="text-justify"> under "Descrição do lote"
     desc_text = ""
     desc_m = re.search(
@@ -327,7 +334,8 @@ def _fetch_detail(url: str) -> tuple[Optional[float], str]:
         raw = desc_m.group(1)
         desc_text = re.sub(r"<[^>]+>", " ", raw).strip()
 
-    return appraisal, desc_text
+    combined = " ".join(filter(None, [heading_text, desc_text]))
+    return appraisal, combined
 
 
 def _last_page(soup: BeautifulSoup) -> int:
@@ -384,19 +392,19 @@ def _scrape_category(
                 # Fetch detail page for appraisal value AND description (for hectares)
                 detail_url = listing.get("listing_url", "")
                 if detail_url:
-                    appraisal, desc_text = _fetch_detail(detail_url)
+                    appraisal, detail_text = _fetch_detail(detail_url)
                     listing["site_appraised_value"] = appraisal
                     if appraisal is not None:
                         listing["appraised_value"] = appraisal
-                    # If hectares not found from title, try description text
-                    if listing.get("hectares") is None and desc_text:
-                        ha, ip = _parse_hectares_wp(desc_text, include_m2=False)
+                    # If hectares not found from card title, try detail page (h1 + description)
+                    if listing.get("hectares") is None and detail_text:
+                        ha, ip = _parse_hectares_wp(detail_text, include_m2=False)
                         if ha is None:
-                            ha, ip = _parse_hectares_wp(desc_text, include_m2=True)
-                        if ha is not None and ha >= 0.4:
+                            ha, ip = _parse_hectares_wp(detail_text, include_m2=True)
+                        if ha is not None and ha > 0:
                             listing["hectares"] = ha
                             listing["is_partial"] = ip
-                            logger.debug("grupolance: description ha=%.4f for %s", ha, detail_url)
+                            logger.debug("grupolance: detail ha=%.4f for %s", ha, detail_url)
                     logger.debug("grupolance: %s appraisal=%s ha=%s", detail_url, appraisal, listing.get("hectares"))
                     time.sleep(detail_delay)
                 results.append(listing)

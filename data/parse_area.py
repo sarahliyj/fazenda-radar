@@ -134,7 +134,7 @@ def parse_hectares(text: str, include_m2: bool = True) -> Optional[float]:
       3. km²  (× 100)
       4. m²   (÷ 10,000)  — skipped when include_m2=False
 
-    Returns None if nothing found or result is implausibly small (< 0.4 ha).
+    Returns None if nothing is found or the result is zero / negative.
     """
     # 1. Agrarian notation: must come first to avoid partial matches
     for m in _HA_AGRARIAN.finditer(text):
@@ -142,7 +142,7 @@ def parse_hectares(text: str, include_m2: bool = True) -> Optional[float]:
             val = int(m.group(1)) + int(m.group(2)) / 100 + int(m.group(3)) / 10_000
         except ValueError:
             continue
-        if val >= 0.4:
+        if val > 0:
             return round(val, 4)
 
     # 2. ha / hectares / alqueires
@@ -152,7 +152,7 @@ def parse_hectares(text: str, include_m2: bool = True) -> Optional[float]:
             continue
         if re.search(r"alqueire", m.group(0), re.IGNORECASE):
             val = round(val * _ALQUEIRE_TO_HA, 4)
-        if val >= 0.4:
+        if val > 0:
             return round(val, 4)
 
     # 3. km² → ha
@@ -161,7 +161,7 @@ def parse_hectares(text: str, include_m2: bool = True) -> Optional[float]:
         if val is None or val <= 0:
             continue
         val = round(val * 100, 4)
-        if val >= 0.4:
+        if val > 0:
             return val
 
     # 4. m² → ha (optional — skip when caller wants ha-priority-only pass)
@@ -171,7 +171,7 @@ def parse_hectares(text: str, include_m2: bool = True) -> Optional[float]:
             if val is None or val <= 0:
                 continue
             val = round(val / 10_000, 4)
-            if val >= 0.4:
+            if val > 0:
                 return val
 
     return None
@@ -216,7 +216,7 @@ def parse_hectares_with_partial(text: str, include_m2: bool = True) -> tuple:
     m_ou = _PARTIAL_OU_HA.search(after)
     if m_ou:
         val = normalise_number(m_ou.group(1))
-        if val and val >= 0.4:
+        if val and val > 0:
             return round(val, 4), True
 
     # 2. First ha/alqueires/etc. value in the text after the keyword

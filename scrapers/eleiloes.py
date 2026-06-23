@@ -234,7 +234,7 @@ def _parse_lot_block(block: str, url: str) -> Optional[dict]:
                 hectares, is_partial = _parse_hectares_wp(line, include_m2=True)
                 if hectares:
                     break
-        if hectares is not None and hectares < 0.4:
+        if hectares is not None and hectares <= 0:
             return None
 
         return {
@@ -417,7 +417,7 @@ def _enrich_from_detail(listings: list[dict], delay: float = 1.0) -> None:
             ha, ip = _parse_hectares_wp(page_text, include_m2=False)
             if ha is None:
                 ha, ip = _parse_hectares_wp(page_text, include_m2=True)
-            if ha and ha >= 0.4:
+            if ha and ha > 0:
                 listing["hectares"] = ha
                 listing["is_partial"] = ip
                 logger.debug("e-leiloes: enriched ha %s → %.4f ha", url, ha)
