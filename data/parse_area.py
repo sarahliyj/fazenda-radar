@@ -43,15 +43,16 @@ _ALQUEIRE_TO_HA = 2.42
 # Agrarian notation X,YY,ZZ ha — must be tried BEFORE the general ha pattern
 # to avoid a partial match on just "YY,ZZ ha".
 _HA_AGRARIAN = re.compile(
-    r"(\d+)[.,](\d{2})[.,](\d{2})\s*(?:has?\b|hec?tare?s?)",
+    r"(\d+)[.,](\d{2})[.,](\d{2})[\s-]*(?:has?\b|hec?tare?s?)",
     re.IGNORECASE,
 )
 
 # General ha / alqueires — captures the numeric part; unit detected from match text.
 # Number part covers: integers, BR decimals, BR thousands, EN decimals, EN thousands.
+# Separator between number and unit: whitespace OR hyphen (URL slugs use hyphens).
 _HA_PAT = re.compile(
     r"([\d]{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|[\d]+(?:[.,]\d+)?)"
-    r"\s*"
+    r"[\s-]*"
     r"(?:has?\b|hec?tare?s?|alqueire?s?)",
     re.IGNORECASE,
 )
@@ -59,7 +60,7 @@ _HA_PAT = re.compile(
 # km² / km2 → × 100
 _KM2_PAT = re.compile(
     r"([\d]{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|[\d]+(?:[.,]\d+)?)"
-    r"\s*"
+    r"[\s-]*"
     r"(?:km[²2²]|km\s*2\b)",
     re.IGNORECASE,
 )
@@ -67,7 +68,7 @@ _KM2_PAT = re.compile(
 # m² / m2 / metros quadrados → ÷ 10,000
 _M2_PAT = re.compile(
     r"([\d]{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|[\d]+(?:[.,]\d+)?)"
-    r"\s*"
+    r"[\s-]*"
     r"(?:m[²2²]|m\s*2\b|metros?\s+quadrados?)",
     re.IGNORECASE,
 )
