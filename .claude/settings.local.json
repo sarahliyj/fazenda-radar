@@ -35,7 +35,12 @@
       "Bash(timeout 40 python3 -m streamlit run dashboard/app.py --server.headless true --server.port 8599)",
       "Read(//tmp/**)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8599/_stcore/health)",
-      "Bash(pkill -f \"streamlit run dashboard/app.py\")"
+      "Bash(pkill -f \"streamlit run dashboard/app.py\")",
+      "Bash(cat requirements.txt)",
+      "Bash(ls -la .streamlit/)",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('dashboard/app.py'\\).read\\(\\)\\); print\\('app.py OK'\\)\")",
+      "Bash(python3 -m streamlit run dashboard/app.py --server.headless true --server.port 8601)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:8601/_stcore/health)"
     ]
   }
 }
