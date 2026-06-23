@@ -7,9 +7,11 @@ genuinely new and which changed price since they were last seen.
 
 Backend
 -------
-Durable: a Supabase (Postgres) table `listings` (lot_id PK, jsonb data).
-Used whenever SUPABASE_URL + SUPABASE_KEY are configured (Streamlit secrets
-or environment variables). This survives Streamlit Cloud redeploys.
+Durable: a Supabase (Postgres) table `listings` (lot_id PK, jsonb data),
+accessed over Supabase's REST/PostgREST API with plain `requests` — no
+supabase SDK, to avoid its heavy/conflicting dependency tree. Used whenever
+SUPABASE_URL + SUPABASE_KEY are configured (Streamlit secrets or env). This
+survives Streamlit Cloud redeploys.
 
 Fallback: a local JSON file ~/.fazenda_radar_listings.json — used for local
 development when Supabase is not configured. (On Streamlit Cloud the local
@@ -35,12 +37,15 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+import requests
+
 _STORE_FILE = Path.home() / ".fazenda_radar_listings.json"
 _TABLE = "listings"
+_TIMEOUT = 15
 
 
 # ---------------------------------------------------------------------------
-# Backend selection
+# Backend configuration
 # ---------------------------------------------------------------------------
 
 def _get_secret(name: str) -> Optional[str]:
@@ -54,37 +59,57 @@ def _get_secret(name: str) -> Optional[str]:
     return os.environ.get(name)
 
 
-@lru_cache(maxsize=1)
-def _client_and_status():
-    """Return (client_or_None, status_reason). Cached for the session."""
+def _config() -> tuple[Optional[str], Optional[str]]:
+    """Return (rest_base_url, key) or (None, None) when not configured."""
     url = _get_secret("SUPABASE_URL")
     key = _get_secret("SUPABASE_KEY")
     if not url or not key:
+        return None, None
+    base = url.rstrip("/") + "/rest/v1"
+    return base, key
+
+
+def _headers(key: str) -> dict:
+    return {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+
+
+@lru_cache(maxsize=1)
+def _probe() -> tuple[bool, str]:
+    """Check that the durable backend is usable. Cached once per session."""
+    base, key = _config()
+    if not base:
         missing = [n for n in ("SUPABASE_URL", "SUPABASE_KEY") if not _get_secret(n)]
-        return None, f"credenciais ausentes: {', '.join(missing)}"
+        return False, f"credenciais ausentes: {', '.join(missing)}"
     try:
-        from supabase import create_client
+        resp = requests.get(
+            f"{base}/{_TABLE}",
+            headers=_headers(key),
+            params={"select": "lot_id", "limit": "1"},
+            timeout=_TIMEOUT,
+        )
     except Exception as exc:
-        return None, f"pacote supabase não instalado ({exc})"
-    try:
-        return create_client(url, key), "ok"
-    except Exception as exc:
-        return None, f"falha na conexão ({exc})"
-
-
-def _get_client():
-    """Return a cached Supabase client, or None when not configured."""
-    return _client_and_status()[0]
+        return False, f"falha na conexão ({exc})"
+    if resp.status_code == 200:
+        return True, "ok"
+    if resp.status_code in (401, 403):
+        return False, "chave rejeitada (use a secret key, não a publishable)"
+    if resp.status_code == 404:
+        return False, "tabela 'listings' não encontrada (rode o SQL de criação)"
+    return False, f"erro HTTP {resp.status_code}: {resp.text[:120]}"
 
 
 def backend_name() -> str:
     """'supabase' when the durable backend is active, else 'local-file'."""
-    return "supabase" if _get_client() is not None else "local-file"
+    return "supabase" if _probe()[0] else "local-file"
 
 
 def backend_reason() -> str:
-    """Why the durable backend is/ isn't active — for diagnostics in the UI."""
-    return _client_and_status()[1]
+    """Why the durable backend is / isn't active — for diagnostics in the UI."""
+    return _probe()[1]
 
 
 def _price_of(listing: dict) -> Optional[float]:
@@ -101,12 +126,29 @@ def _price_of(listing: dict) -> Optional[float]:
 
 def load_store() -> dict[str, dict]:
     """Load the listings store. Returns {} when empty, missing, or on error."""
-    client = _get_client()
-    if client is not None:
+    base, key = _config()
+    if base and _probe()[0]:
         try:
-            resp = client.table(_TABLE).select("lot_id, data").execute()
-            return {row["lot_id"]: row["data"] for row in (resp.data or [])
-                    if row.get("data")}
+            rows: list[dict] = []
+            offset = 0
+            page = 1000
+            while True:
+                resp = requests.get(
+                    f"{base}/{_TABLE}",
+                    headers={**_headers(key),
+                             "Range-Unit": "items",
+                             "Range": f"{offset}-{offset + page - 1}"},
+                    params={"select": "lot_id,data"},
+                    timeout=_TIMEOUT,
+                )
+                if resp.status_code not in (200, 206):
+                    break
+                batch = resp.json()
+                rows.extend(batch)
+                if len(batch) < page:
+                    break
+                offset += page
+            return {r["lot_id"]: r["data"] for r in rows if r.get("data")}
         except Exception:
             return {}
 
@@ -120,16 +162,22 @@ def load_store() -> dict[str, dict]:
 
 def save_store(store: dict[str, dict]) -> None:
     """Persist the listings store. Silently swallows errors."""
-    client = _get_client()
-    if client is not None:
+    base, key = _config()
+    if base and _probe()[0]:
         try:
             now = datetime.now(timezone.utc).isoformat()
             rows = [{"lot_id": lid, "data": entry, "updated_at": now}
                     for lid, entry in store.items()]
-            if rows:
-                # Upsert in chunks to keep each request small.
-                for i in range(0, len(rows), 500):
-                    client.table(_TABLE).upsert(rows[i:i + 500]).execute()
+            headers = {**_headers(key),
+                       "Prefer": "resolution=merge-duplicates,return=minimal"}
+            for i in range(0, len(rows), 500):
+                requests.post(
+                    f"{base}/{_TABLE}",
+                    headers=headers,
+                    params={"on_conflict": "lot_id"},
+                    data=json.dumps(rows[i:i + 500]),
+                    timeout=_TIMEOUT,
+                )
         except Exception:
             pass
         return

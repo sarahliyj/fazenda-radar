@@ -13,8 +13,8 @@ streamlit>=1.32.0
 # Data processing
 pandas>=2.0.0
 
-# Durable storage (listings persistence across redeploys)
-supabase>=2.4.0
+# Durable storage uses Supabase's REST API via `requests` (above) — no SDK,
+# to avoid the supabase-py dependency tree conflicting with Streamlit.
 
 # Excel export
 openpyxl>=3.1.0
