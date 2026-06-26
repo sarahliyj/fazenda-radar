@@ -886,6 +886,112 @@ bench_df = get_sp_ref_df()
 
 df_all = build_df(st.session_state.all_listings)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared lots-table builder — used by the main table and the new-lots /
+# price-update sections so all three show the exact same full column set.
+# Returns (styled_disp, column_config, st_col, disp).
+# ─────────────────────────────────────────────────────────────────────────────
+def _build_lots_display(df: pd.DataFrame):
+    disp_cols = [
+        "starred",
+        "property_name", "state", "city", "land_type",
+        "auction_date", "hectares", "is_partial",
+        "round_display",
+        "price_round1", "price_per_ha_round1", "discount_round1_pct",
+        "price_round2", "price_per_ha_round2", "discount_round2_pct",
+        "sp_price_per_ha_low", "sp_price_per_ha_mid", "sp_price_per_ha_high",
+        "sp_match_level",
+        "auction_type", "listing_url",
+    ]
+    disp = df[[c for c in disp_cols + ["lot_id"] if c in df.columns]].copy()
+
+    # Município-matched rows first (most reliable), state-average last.
+    if "sp_match_level" in disp.columns:
+        _match_priority = {"municipio": 0, "regiao": 1, "estado": 2}
+        disp["_sort_key"] = disp["sp_match_level"].map(_match_priority).fillna(3)
+        disp = disp.sort_values("_sort_key", kind="stable").drop(columns="_sort_key")
+
+    if "sp_match_level" in disp.columns:
+        _sp_ref_labels = {
+            "municipio": t("sp_ref_mun"),
+            "regiao":    t("sp_ref_reg"),
+            "estado":    t("sp_ref_state"),
+        }
+        disp["sp_match_level"] = disp["sp_match_level"].map(_sp_ref_labels).fillna("")
+
+    disp.rename(columns={
+        "starred": t("col_starred"),
+        "property_name": t("col_property"), "state": t("col_uf"),
+        "city": t("col_city"), "land_type": t("col_land_type_short"),
+        "round_display": t("col_round"),
+        "hectares": t("col_hectares"), "is_partial": t("col_partial"),
+        "auction_date": t("col_date"),
+        "price_round1":        t("col_preco_r1"),
+        "price_per_ha_round1": t("col_pha_r1"),
+        "discount_round1_pct": t("col_desc_r1"),
+        "price_round2":        t("col_preco_r2"),
+        "price_per_ha_round2": t("col_pha_r2"),
+        "discount_round2_pct": t("col_desc_r2"),
+        "sp_price_per_ha_low": t("col_sp_low"),
+        "sp_price_per_ha_mid": t("col_sp_mid"),
+        "sp_price_per_ha_high": t("col_sp_high"),
+        "sp_match_level": t("col_sp_ref"),
+        "auction_type": t("col_modality"), "listing_url": t("col_url"),
+    }, inplace=True)
+
+    st_col = t("col_starred")
+    pr   = t("col_property")
+    uf   = t("col_uf");    ci  = t("col_city");  lt = t("col_land_type_short")
+    rd   = t("col_round")
+    ha   = t("col_hectares"); pt = t("col_partial"); dt = t("col_date")
+    pr1  = t("col_preco_r1"); pha1 = t("col_pha_r1"); dc1 = t("col_desc_r1")
+    pr2  = t("col_preco_r2"); pha2 = t("col_pha_r2"); dc2 = t("col_desc_r2")
+    spl  = t("col_sp_low"); spm = t("col_sp_mid"); sph = t("col_sp_high")
+    spr  = t("col_sp_ref")
+    mo   = t("col_modality"); ur = t("col_url")
+
+    def _row_style(row):
+        is_starred  = bool(row.get(st_col))
+        match_label = row.get(spr, "")
+        if is_starred:
+            style = "background-color: #d6f5d6; color: #1a1a1a"   # green  — starred
+        elif match_label == t("sp_ref_state"):
+            style = "background-color: #e4e4e4; color: #1a1a1a"   # grey   — state avg
+        elif match_label == t("sp_ref_reg"):
+            style = "background-color: #fff8e1; color: #1a1a1a"   # yellow — region avg
+        else:
+            style = ""
+        return [style] * len(row)
+
+    styled_disp = disp.style.apply(_row_style, axis=1)
+
+    column_config = {
+        st_col: st.column_config.CheckboxColumn(st_col, width=50),
+        pr:    st.column_config.TextColumn(pr, width="large"),
+        uf:    st.column_config.TextColumn(uf, width=55),
+        ci:    st.column_config.TextColumn(ci, width="small"),
+        lt:    st.column_config.TextColumn(lt, width="small"),
+        rd:    st.column_config.TextColumn(rd, width=70),
+        ha:    st.column_config.NumberColumn(ha, format="%,.2f ha"),
+        pt:    st.column_config.CheckboxColumn(pt, width=60, help="Parte ideal / fração ideal — only a share of the property is being sold"),
+        pr1:   st.column_config.NumberColumn(pr1,  format="R$ %,.0f"),
+        pha1:  st.column_config.NumberColumn(pha1, format="R$ %,.0f"),
+        dc1:   st.column_config.NumberColumn(dc1,  format="%.1f%%"),
+        pr2:   st.column_config.NumberColumn(pr2,  format="R$ %,.0f"),
+        pha2:  st.column_config.NumberColumn(pha2, format="R$ %,.0f"),
+        dc2:   st.column_config.NumberColumn(dc2,  format="%.1f%%"),
+        spl:   st.column_config.NumberColumn(spl, format="R$ %,.0f", help=t("sp_col_help")),
+        spm:   st.column_config.NumberColumn(spm, format="R$ %,.0f", help=t("sp_col_help")),
+        sph:   st.column_config.NumberColumn(sph, format="R$ %,.0f", help=t("sp_col_help")),
+        spr:   st.column_config.TextColumn(spr, width="small", help=t("sp_col_help")),
+        mo:    st.column_config.TextColumn(mo, width="small"),
+        ur:    st.column_config.LinkColumn(ur, width=80),
+        "lot_id": None,
+    }
+    return styled_disp, column_config, st_col, disp
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Top-bar: title + Search/Load More button in upper-right
 # ─────────────────────────────────────────────────────────────────────────────
@@ -950,52 +1056,38 @@ with tab_lots:
     _new_lots      = st.session_state.get("last_new_lots", [])
     _price_changes = st.session_state.get("last_price_changes", [])
     if _new_lots or _price_changes:
-        _cN, _cP = st.columns(2)
-        with _cN:
-            with st.expander(f"{t('new_lots_header')} ({len(_new_lots)})",
-                             expanded=bool(_new_lots)):
-                if _new_lots:
-                    _ndf = pd.DataFrame([{
-                        t("col_property"): l.get("property_name"),
-                        t("col_uf"):       l.get("state"),
-                        t("col_city"):     l.get("city"),
-                        t("col_hectares"): l.get("hectares"),
-                        t("col_preco_r1"): l.get("auction_price") or l.get("price_round1"),
-                        t("col_url"):      l.get("listing_url"),
-                    } for l in _new_lots])
-                    st.dataframe(
-                        _ndf, use_container_width=True, hide_index=True,
-                        column_config={
-                            t("col_property"): st.column_config.TextColumn(width="large"),
-                            t("col_hectares"): st.column_config.NumberColumn(format="%,.2f ha"),
-                            t("col_preco_r1"): st.column_config.NumberColumn(format="R$ %,.0f"),
-                            t("col_url"):      st.column_config.LinkColumn(width=70),
-                        },
+        # New lots — full column set, stacked above the price updates.
+        with st.expander(f"{t('new_lots_header')} ({len(_new_lots)})",
+                         expanded=bool(_new_lots)):
+            if _new_lots:
+                _new_ids = {str(l.get("lot_id")) for l in _new_lots}
+                _ndf = df_all[df_all["lot_id"].astype(str).isin(_new_ids)]
+                _ns, _ncfg, _nstc, _nd = _build_lots_display(_ndf)
+                st.dataframe(_ns, use_container_width=True, hide_index=True,
+                             column_config=_ncfg)
+            else:
+                st.caption(t("no_new_lots"))
+
+        # Price updates — full column set. Old → new price shown as a caption
+        # above the table, then the same full table as everywhere else.
+        with st.expander(f"{t('price_changes_header')} ({len(_price_changes)})",
+                         expanded=bool(_price_changes)):
+            if _price_changes:
+                _chg_lines = []
+                for l in _price_changes:
+                    _op, _np = l.get("old_price"), l.get("new_price")
+                    _chg_lines.append(
+                        f"• {l.get('property_name','?')[:60]} — "
+                        f"R$ {(_op or 0):,.0f} → R$ {(_np or 0):,.0f}"
                     )
-                else:
-                    st.caption(t("no_new_lots"))
-        with _cP:
-            with st.expander(f"{t('price_changes_header')} ({len(_price_changes)})",
-                             expanded=bool(_price_changes)):
-                if _price_changes:
-                    _pdf = pd.DataFrame([{
-                        t("col_property"):    l.get("property_name"),
-                        t("col_uf"):          l.get("state"),
-                        t("col_old_price"):   l.get("old_price"),
-                        t("col_new_price"):   l.get("new_price"),
-                        t("col_url"):         l.get("listing_url"),
-                    } for l in _price_changes])
-                    st.dataframe(
-                        _pdf, use_container_width=True, hide_index=True,
-                        column_config={
-                            t("col_property"):  st.column_config.TextColumn(width="large"),
-                            t("col_old_price"): st.column_config.NumberColumn(format="R$ %,.0f"),
-                            t("col_new_price"): st.column_config.NumberColumn(format="R$ %,.0f"),
-                            t("col_url"):       st.column_config.LinkColumn(width=70),
-                        },
-                    )
-                else:
-                    st.caption(t("no_price_changes"))
+                st.caption("  \n".join(_chg_lines))
+                _chg_ids = {str(l.get("lot_id")) for l in _price_changes}
+                _pdf = df_all[df_all["lot_id"].astype(str).isin(_chg_ids)]
+                _ps, _pcfg, _pstc, _pd_ = _build_lots_display(_pdf)
+                st.dataframe(_ps, use_container_width=True, hide_index=True,
+                             column_config=_pcfg)
+            else:
+                st.caption(t("no_price_changes"))
 
     # ── Filters ───────────────────────────────────────────────────────────────
     st.markdown(f'<h3 class="section">{t("filters_header")}</h3>', unsafe_allow_html=True)
@@ -1233,116 +1325,11 @@ with tab_lots:
     if df.empty:
         st.warning(t("lots_no_match"))
     else:
-        disp_cols = [
-            "starred",
-            "property_name", "state", "city", "land_type",
-            "auction_date", "hectares", "is_partial",
-            "round_display",
-            "price_round1", "price_per_ha_round1", "discount_round1_pct",
-            "price_round2", "price_per_ha_round2", "discount_round2_pct",
-            "sp_price_per_ha_low", "sp_price_per_ha_mid", "sp_price_per_ha_high",
-            "sp_match_level",
-            "auction_type", "listing_url",
-        ]
-        # Keep lot_id (for starred sync) — not displayed
-        disp = df[[c for c in disp_cols + ["lot_id"] if c in df.columns]].copy()
-
-        # Push rows whose S&P figures come from a state-wide average (or have
-        # no S&P match at all) toward the bottom — município-matched rows
-        # (the most reliable) are shown first. Stable sort preserves the
-        # existing relative order (score, etc.) within each group.
-        if "sp_match_level" in disp.columns:
-            _match_priority = {"municipio": 0, "regiao": 1, "estado": 2}
-            disp["_sort_key"] = disp["sp_match_level"].map(_match_priority).fillna(3)
-            disp = disp.sort_values("_sort_key", kind="stable").drop(columns="_sort_key")
-
-        # Translate the raw match-level flag ("municipio"/"estado") into a
-        # readable label for display — same wording used in the Excel export.
-        if "sp_match_level" in disp.columns:
-            _sp_ref_labels = {
-                "municipio": t("sp_ref_mun"),
-                "regiao":    t("sp_ref_reg"),
-                "estado":    t("sp_ref_state"),
-            }
-            disp["sp_match_level"] = disp["sp_match_level"].map(_sp_ref_labels).fillna("")
-
-        disp.rename(columns={
-            "starred": t("col_starred"),
-            "property_name": t("col_property"), "state": t("col_uf"),
-            "city": t("col_city"), "land_type": t("col_land_type_short"),
-            "round_display": t("col_round"),
-            "hectares": t("col_hectares"), "is_partial": t("col_partial"),
-            "auction_date": t("col_date"),
-            "price_round1":        t("col_preco_r1"),
-            "price_per_ha_round1": t("col_pha_r1"),
-            "discount_round1_pct": t("col_desc_r1"),
-            "price_round2":        t("col_preco_r2"),
-            "price_per_ha_round2": t("col_pha_r2"),
-            "discount_round2_pct": t("col_desc_r2"),
-            "sp_price_per_ha_low": t("col_sp_low"),
-            "sp_price_per_ha_mid": t("col_sp_mid"),
-            "sp_price_per_ha_high": t("col_sp_high"),
-            "sp_match_level": t("col_sp_ref"),
-            "auction_type": t("col_modality"), "listing_url": t("col_url"),
-        }, inplace=True)
-
-        st_col = t("col_starred")
-        pr   = t("col_property")
-        uf   = t("col_uf");    ci  = t("col_city");  lt = t("col_land_type_short")
-        rd   = t("col_round")
-        ha   = t("col_hectares"); pt = t("col_partial"); dt = t("col_date")
-        pr1  = t("col_preco_r1"); pha1 = t("col_pha_r1"); dc1 = t("col_desc_r1")
-        pr2  = t("col_preco_r2"); pha2 = t("col_pha_r2"); dc2 = t("col_desc_r2")
-        spl  = t("col_sp_low"); spm = t("col_sp_mid"); sph = t("col_sp_high")
-        spr  = t("col_sp_ref")
-        mo   = t("col_modality"); ur = t("col_url")
-
-        # Row highlighting: starred lots in light green, lots whose S&P
-        # figures fall back to a state-wide average (município not in the
-        # S&P database) in light grey. Streamlit's data_editor only applies
-        # pandas-Styler colors to non-editable columns — since every column
-        # except "Starred" is disabled here, the highlight still paints the
-        # whole row visually even though the checkbox cell itself stays plain.
-        def _row_style(row):
-            is_starred  = bool(row.get(st_col))
-            match_label = row.get(spr, "")
-            if is_starred:
-                style = "background-color: #d6f5d6; color: #1a1a1a"   # green  — starred
-            elif match_label == t("sp_ref_state"):
-                style = "background-color: #e4e4e4; color: #1a1a1a"   # grey   — state avg
-            elif match_label == t("sp_ref_reg"):
-                style = "background-color: #fff8e1; color: #1a1a1a"   # yellow — region avg
-            else:
-                style = ""
-            return [style] * len(row)
-
-        styled_disp = disp.style.apply(_row_style, axis=1)
+        styled_disp, _main_cfg, st_col, disp = _build_lots_display(df)
 
         edited = st.data_editor(
             styled_disp, use_container_width=True, hide_index=True, height=520,
-            column_config={
-                st_col: st.column_config.CheckboxColumn(st_col, width=50),
-                pr:    st.column_config.TextColumn(pr, width="large"),
-                uf:    st.column_config.TextColumn(uf, width=55),
-                ci:    st.column_config.TextColumn(ci, width="small"),
-                lt:    st.column_config.TextColumn(lt, width="small"),
-                rd:    st.column_config.TextColumn(rd, width=70),
-                ha:    st.column_config.NumberColumn(ha, format="%,.2f ha"),
-                pt:    st.column_config.CheckboxColumn(pt, width=60, help="Parte ideal / fração ideal — only a share of the property is being sold"),
-                pr1:   st.column_config.NumberColumn(pr1,  format="R$ %,.0f"),
-                pha1:  st.column_config.NumberColumn(pha1, format="R$ %,.0f"),
-                dc1:   st.column_config.NumberColumn(dc1,  format="%.1f%%"),
-                pr2:   st.column_config.NumberColumn(pr2,  format="R$ %,.0f"),
-                pha2:  st.column_config.NumberColumn(pha2, format="R$ %,.0f"),
-                dc2:   st.column_config.NumberColumn(dc2,  format="%.1f%%"),
-                spl:   st.column_config.NumberColumn(spl, format="R$ %,.0f", help=t("sp_col_help")),
-                spm:   st.column_config.NumberColumn(spm, format="R$ %,.0f", help=t("sp_col_help")),
-                sph:   st.column_config.NumberColumn(sph, format="R$ %,.0f", help=t("sp_col_help")),
-                spr:   st.column_config.TextColumn(spr, width="small", help=t("sp_col_help")),
-                mo:    st.column_config.TextColumn(mo, width="small"),
-                ur:    st.column_config.LinkColumn(ur, width=80),
-                "lot_id": None,
-            },
+            column_config=_main_cfg,
             disabled=[c for c in disp.columns if c not in (st_col,)],
             key="lots_table",
         )
