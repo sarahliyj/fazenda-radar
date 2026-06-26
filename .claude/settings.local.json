@@ -42,7 +42,9 @@
       "Bash(python3 -m streamlit run dashboard/app.py --server.headless true --server.port 8601)",
       "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:8601/_stcore/health)",
       "Bash(git commit -m 'docs: clarify secret vs publishable key for Supabase *)",
-      "Bash(python3 -c \"import ast; ast.parse\\(open\\('dashboard/app.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")"
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('dashboard/app.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(python3 -m streamlit run dashboard/app.py --server.headless true --server.port 8609)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:8609/_stcore/health)"
     ]
   }
 }

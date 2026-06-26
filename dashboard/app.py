@@ -38,7 +38,10 @@ from data.benchmarks import BENCHMARKS, _ALL_TYPES as ALL_LAND_TYPES, benchmarks
 from data.sp_reference import sp_reference_table
 from data.apify_enricher import enrich_hectares
 from data.scorer import score_all
-from data.listings_store import load_store, save_store, merge_scrape, backend_name, backend_reason
+from data.listings_store import (
+    load_store, save_store, merge_scrape, backend_name, backend_reason,
+    save_last_search, load_last_search,
+)
 
 try:
     from scrapers.eleiloes import scrape as scrape_eleiloes
@@ -450,10 +453,12 @@ if "listings_store" not in st.session_state:
     st.session_state.listings_store: dict[str, dict] = load_store()
 if "all_listings" not in st.session_state:
     st.session_state.all_listings = list(st.session_state.listings_store.values())
+# Last-search summary — reload the persisted delta so the new-lots / price-
+# update sections survive a browser refresh, not just the in-memory session.
 if "last_new_lots" not in st.session_state:
-    st.session_state.last_new_lots: list[dict] = []
-if "last_price_changes" not in st.session_state:
-    st.session_state.last_price_changes: list[dict] = []
+    _delta = load_last_search()
+    st.session_state.last_new_lots: list[dict] = _delta.get("new_lots", [])
+    st.session_state.last_price_changes: list[dict] = _delta.get("price_changes", [])
 
 # Initialise checkbox states on first load so widgets render correctly from the start
 _all_src_keys = ["sbid", "lj", "lim", "mega", "gl", "lb", "lvip"]
@@ -854,6 +859,17 @@ def _run_batch(active_sources: list[str], apify_token: str) -> None:
     st.session_state.last_new_lots = new_lots
     st.session_state.last_price_changes = price_changes
     st.session_state.last_scraped = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    # Persist the delta so the summary sections survive a browser refresh.
+    save_last_search({
+        "scraped_at": st.session_state.last_scraped,
+        "new_lots": [{"lot_id": l.get("lot_id"),
+                      "property_name": l.get("property_name")} for l in new_lots],
+        "price_changes": [{"lot_id": l.get("lot_id"),
+                           "property_name": l.get("property_name"),
+                           "old_price": l.get("old_price"),
+                           "new_price": l.get("new_price")} for l in price_changes],
+    })
 
     st.success(
         f"{len(new_lots)} novos · {len(price_changes)} atualizações de preço "

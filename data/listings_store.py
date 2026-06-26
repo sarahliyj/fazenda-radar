@@ -40,7 +40,9 @@ from typing import Optional
 import requests
 
 _STORE_FILE = Path.home() / ".fazenda_radar_listings.json"
+_LAST_SEARCH_FILE = Path.home() / ".fazenda_radar_last_search.json"
 _TABLE = "listings"
+_LAST_SEARCH_KEY = "__last_search__"   # reserved row in the listings table
 _TIMEOUT = 15
 
 
@@ -148,11 +150,13 @@ def load_store() -> dict[str, dict]:
                 if len(batch) < page:
                     break
                 offset += page
-            return {r["lot_id"]: r["data"] for r in rows if r.get("data")}
+            # Skip reserved meta rows (e.g. the last-search delta).
+            return {r["lot_id"]: r["data"] for r in rows
+                    if r.get("data") and not str(r["lot_id"]).startswith("__")}
         except Exception:
             return {}
 
-    # Local-file fallback
+    # Local-file fallback (listings file never contains meta keys)
     try:
         data = json.loads(_STORE_FILE.read_text())
         return data if isinstance(data, dict) else {}
@@ -187,6 +191,63 @@ def save_store(store: dict[str, dict]) -> None:
         _STORE_FILE.write_text(json.dumps(store, ensure_ascii=False))
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Last-search delta (new lots + price changes) — persisted so the two summary
+# sections survive a browser refresh, not just the in-memory session.
+# ---------------------------------------------------------------------------
+
+def save_last_search(delta: dict) -> None:
+    """Persist the most recent search's new-lot / price-change summary."""
+    base, key = _config()
+    if base and _probe()[0]:
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            row = [{"lot_id": _LAST_SEARCH_KEY, "data": delta, "updated_at": now}]
+            headers = {**_headers(key),
+                       "Prefer": "resolution=merge-duplicates,return=minimal"}
+            requests.post(
+                f"{base}/{_TABLE}",
+                headers=headers,
+                params={"on_conflict": "lot_id"},
+                data=json.dumps(row),
+                timeout=_TIMEOUT,
+            )
+        except Exception:
+            pass
+        return
+
+    try:
+        _LAST_SEARCH_FILE.write_text(json.dumps(delta, ensure_ascii=False))
+    except Exception:
+        pass
+
+
+def load_last_search() -> dict:
+    """Load the most recent search's summary. Returns {} when none/error."""
+    base, key = _config()
+    if base and _probe()[0]:
+        try:
+            resp = requests.get(
+                f"{base}/{_TABLE}",
+                headers=_headers(key),
+                params={"select": "data", "lot_id": f"eq.{_LAST_SEARCH_KEY}"},
+                timeout=_TIMEOUT,
+            )
+            if resp.status_code == 200:
+                rows = resp.json()
+                if rows and rows[0].get("data"):
+                    return rows[0]["data"]
+            return {}
+        except Exception:
+            return {}
+
+    try:
+        d = json.loads(_LAST_SEARCH_FILE.read_text())
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
 
 
 # ---------------------------------------------------------------------------
