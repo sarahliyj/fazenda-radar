@@ -38,10 +38,63 @@ from data.benchmarks import BENCHMARKS, _ALL_TYPES as ALL_LAND_TYPES, benchmarks
 from data.sp_reference import sp_reference_table
 from data.apify_enricher import enrich_hectares
 from data.scorer import score_all
-from data.listings_store import (
-    load_store, save_store, merge_scrape, backend_name, backend_reason,
-    save_last_search, load_last_search,
-)
+try:
+    from data.listings_store import (
+        load_store, save_store, merge_scrape, backend_name, backend_reason,
+        save_last_search, load_last_search,
+    )
+except Exception as _ls_exc:  # pragma: no cover — keep the app alive if the
+    # storage module can't be imported (e.g. a stale hot-reload cache). The
+    # app still works; persistence and new/price tracking are simply off.
+    from datetime import date as _date
+
+    _LS_ERR = _ls_exc
+
+    def load_store() -> dict:
+        return {}
+
+    def save_store(store) -> None:
+        pass
+
+    def save_last_search(delta) -> None:
+        pass
+
+    def load_last_search() -> dict:
+        return {}
+
+    def backend_name() -> str:
+        return "indisponível"
+
+    def backend_reason() -> str:
+        return f"módulo de armazenamento falhou ao importar: {_LS_ERR}"
+
+    def merge_scrape(scraped, store):
+        """Pure in-memory merge (no persistence) — mirrors the real logic."""
+        today = _date.today().isoformat()
+        updated = dict(store)
+        new_lots, price_changes = [], []
+        for lot in scraped:
+            lid = lot.get("lot_id")
+            if not lid:
+                continue
+            lid = str(lid)
+            new_price = lot.get("auction_price") or lot.get("price_round1")
+            if lid not in updated:
+                entry = {**lot, "first_seen": today, "last_seen": today,
+                         "prev_price": new_price}
+                updated[lid] = entry
+                new_lots.append(entry)
+            else:
+                prev = updated[lid]
+                old_price = prev.get("auction_price") or prev.get("price_round1")
+                entry = {**lot, "first_seen": prev.get("first_seen", today),
+                         "last_seen": today, "prev_price": old_price}
+                if (new_price is not None and old_price is not None
+                        and new_price != old_price):
+                    price_changes.append({**entry, "old_price": old_price,
+                                          "new_price": new_price})
+                updated[lid] = entry
+        return list(updated.values()), new_lots, price_changes, updated
 
 try:
     from scrapers.eleiloes import scrape as scrape_eleiloes
