@@ -56,7 +56,11 @@ from typing import Optional
 
 import requests
 
-from data.parse_area import parse_hectares as _parse_hectares_from_text, parse_hectares_with_partial as _parse_hectares_wp
+from data.parse_area import (
+    parse_hectares as _parse_hectares_from_text,
+    parse_hectares_with_partial as _parse_hectares_wp,
+    normalise_number as _normalise_number,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -143,23 +147,20 @@ def _get_template_prop(product: dict, prop_id: str) -> Optional[str]:
 
 # ── Area patterns for free-text title parsing ─────────────────────────────────
 def _parse_hectares_from_template(raw: Optional[str]) -> Optional[float]:
-    """Parse areatotal/areadoterreno from template (inconsistently m² or ha).
+    """Parse areatotal/areadoterreno from template.
 
-    Superbid stores these values without units. Heuristic:
-      > 5000  → treat as m², divide by 10 000
-      ≤ 5000  → treat as ha directly
+    Superbid stores these as a plain number in **square metres** (e.g. "1000"
+    = 1000 m², "16472.3" = 16 472,30 m²). Always divide by 10 000 to get ha.
+    (The old >5000→m², ≤5000→ha heuristic was wrong: a 1000 m² lot became
+    1000 ha.) Used only as a last resort, after the title/description — which
+    carry explicit units — have been tried.
     """
     if raw is None:
         return None
-    try:
-        val = _br_to_float(raw)
-    except ValueError:
+    val = _normalise_number(str(raw))
+    if val is None or val <= 0:
         return None
-    if val <= 0:
-        return None
-    if val > 5000:
-        return round(val / 10_000, 4)
-    return val
+    return round(val / 10_000, 4)
 
 
 def _parse_offer(offer: dict) -> Optional[dict]:
@@ -189,19 +190,26 @@ def _parse_offer(offer: dict) -> Optional[dict]:
         city = re.sub(r"\s*-\s*[A-Z]{2}\s*$", "", city_state).strip()
 
         # --- Hectares ---
-        # 1. Parse from title (ha/km² only — m² deferred until after description)
+        # Priority: explicit-unit text (title/description) before the unitless
+        # template number. ha/km² before m² so a m² figure can't mask a real ha.
+        raw_desc = (
+            product.get("detailedDescription")
+            or (offer.get("offerDescription") or {}).get("offerDescription")
+            or ""
+        )
+        desc = re.sub(r"<[^>]+>", " ", raw_desc).strip() if raw_desc else ""
+
+        # 1. Title — ha / km² only
         hectares, is_partial = _parse_hectares_wp(property_name, include_m2=False)
-        # 2. Fallback: product.detailedDescription (HTML — strip tags)
+        # 2. Description — ha/km² then m²
+        if hectares is None and desc:
+            hectares, is_partial = _parse_hectares_wp(desc, include_m2=False)
+            if hectares is None:
+                hectares, is_partial = _parse_hectares_wp(desc, include_m2=True)
+        # 3. Title — m² (now that all ha sources are exhausted)
         if hectares is None:
-            raw_desc = (
-                product.get("detailedDescription")
-                or (offer.get("offerDescription") or {}).get("offerDescription")
-                or ""
-            )
-            if raw_desc:
-                desc = re.sub(r"<[^>]+>", " ", raw_desc).strip()
-                hectares, is_partial = _parse_hectares_wp(desc)
-        # 3. Fallback: template properties (areatotal / areadoterreno)
+            hectares, is_partial = _parse_hectares_wp(property_name, include_m2=True)
+        # 4. Template areatotal / areadoterreno (unitless m², last resort)
         if hectares is None:
             area_raw = _get_template_prop(product, "areatotal")
             if area_raw is None:

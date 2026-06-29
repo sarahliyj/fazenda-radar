@@ -198,6 +198,7 @@ STRINGS: dict[str, dict[str, str]] = {
                              "en": "Judicial · Extrajudicial · Direct Sale"},
     "filter_price_range":   {"pt": "Preço leilão (R$)",       "en": "Auction price (R$)"},
     "filter_ha_range":      {"pt": "Hectares",                "en": "Hectares"},
+    "filter_ha_bucket":     {"pt": "Tamanho (ha)",            "en": "Size (ha)"},
     "filter_date_from":     {"pt": "Data leilão — de",        "en": "Auction date — from"},
     "filter_date_to":       {"pt": "Data leilão — até",       "en": "Auction date — to"},
 
@@ -1194,15 +1195,9 @@ with tab_lots:
         else:
             price_range = (0, 0)
     with fc6:
-        ha_vals = df_all["hectares"].dropna()
-        if not ha_vals.empty:
-            hmin, hmax = float(ha_vals.min()), float(ha_vals.max())
-            if hmin == hmax:
-                hmax = hmin + 1
-            ha_range = st.slider(t("filter_ha_range"), hmin, hmax, (hmin, hmax),
-                                 format="%.2f ha", key="lot_ha")
-        else:
-            ha_range = (0.0, 0.0)
+        _HA_BUCKETS = ["< 100 ha", "100–1000 ha", "> 1000 ha"]
+        ha_sel = st.multiselect(t("filter_ha_bucket"), options=_HA_BUCKETS,
+                                placeholder=t("filter_all"), key="lot_ha_bucket")
 
     fc8, fc9, fc10 = st.columns(3)
     with fc8:
@@ -1249,8 +1244,16 @@ with tab_lots:
         df = df[df["auction_type"].isin(sel_modality)]
     if price_range != (0, 0):
         df = df[df["auction_price"].isna() | df["auction_price"].between(*price_range)]
-    if ha_range != (0.0, 0.0):
-        df = df[df["hectares"].isna() | df["hectares"].between(*ha_range)]
+    if ha_sel:
+        _h = df["hectares"]
+        _cond = pd.Series(False, index=df.index)
+        if "< 100 ha" in ha_sel:
+            _cond |= _h < 100
+        if "100–1000 ha" in ha_sel:
+            _cond |= (_h >= 100) & (_h <= 1000)
+        if "> 1000 ha" in ha_sel:
+            _cond |= _h > 1000
+        df = df[_cond.fillna(False)]   # lots without a hectare value are excluded
     if date_from:
         df = df[df["auction_date"].isna() | (df["auction_date"] >= str(date_from))]
     if date_to:
@@ -1273,8 +1276,8 @@ with tab_lots:
 
     if price_range != (0, 0) and price_range != (int(df_all['auction_price'].dropna().min() if not df_all['auction_price'].dropna().empty else 0), int(df_all['auction_price'].dropna().max() if not df_all['auction_price'].dropna().empty else 0)):
         active.append(f"R$ {price_range[0]:,}–{price_range[1]:,}".replace(",", "."))
-    if ha_range != (0.0, 0.0) and ha_range != (float(df_all['hectares'].dropna().min() if not df_all['hectares'].dropna().empty else 0), float(df_all['hectares'].dropna().max() if not df_all['hectares'].dropna().empty else 0)):
-        active.append(f"{ha_range[0]:.0f}–{ha_range[1]:.0f} ha")
+    if ha_sel:
+        active.append(", ".join(ha_sel))
     if date_from:
         active.append(f"{t('chip_from')} {date_from}")
     if date_to:
