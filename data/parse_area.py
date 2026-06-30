@@ -85,9 +85,8 @@ def normalise_number(raw: str) -> Optional[float]:
       Both . and , present → whichever comes last is the decimal separator.
         "1.234,56" → 1234.56   (BR: dot=thousands, comma=decimal)
         "1,234.56" → 1234.56   (EN: comma=thousands, dot=decimal)
-      Only , present:
-        Followed by exactly 3 digits at end → EN thousands ("1,234" → 1234)
-        Otherwise → BR decimal ("237,6" → 237.6)
+      Only , present → BR decimal ("3,025" → 3.025, "237,6" → 237.6)
+        (Brazilian thousands use dots, so "3,025 ha" = 3.025 ha, not 3025 ha)
       Only . present:
         Followed by exactly 3 digits at end → BR thousands ("1.500" → 1500)
         Otherwise → EN/plain decimal ("50.5" → 50.5)
@@ -107,10 +106,9 @@ def normalise_number(raw: str) -> Optional[float]:
                 # EN format: "1,234.56"
                 return float(raw.replace(",", ""))
         elif has_comma:
-            # Only commas — check if it looks like EN thousands ("1,234")
-            after_last_comma = raw.rsplit(",", 1)[-1]
-            if len(after_last_comma) == 3 and after_last_comma.isdigit():
-                return float(raw.replace(",", ""))   # EN thousands
+            # Only commas → treat as BR decimal (comma = decimal separator).
+            # In Brazilian notation thousands use dots ("1.000 ha"), so "3,025 ha"
+            # means 3.025 ha, not 3025 ha.
             return float(raw.replace(",", "."))       # BR decimal
         elif has_dot:
             # Only dots — check if it looks like BR thousands ("1.500")
