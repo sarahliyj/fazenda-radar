@@ -262,25 +262,32 @@ def merge_scrape(
     Merge a fresh scrape into the rolling store.
 
     Returns (merged, new_lots, price_changes, updated_store):
-      - merged        : every lot in the store after merging (the full dataset
-                        to display) — lots not in this scrape are retained.
+      - merged        : every lot in the store after merging.
       - new_lots      : lots seen for the first time in this scrape.
-      - price_changes : lots already in the store whose price differs now;
-                        each carries extra keys old_price / new_price.
+      - price_changes : lots whose price changed; each has old_price/new_price.
       - updated_store : the new store dict (caller persists it).
 
-    A lot is keyed by lot_id. Lots without a lot_id are skipped (can't track).
+    Expired/sold detection: any lot from a source that was scraped this run
+    but was not returned is considered gone (sold or expired) and is removed
+    from the store.  Sources that returned zero results are treated as scraper
+    failures and their lots are preserved.
     """
     today = date.today().isoformat()
     updated = dict(store)
     new_lots: list[dict] = []
     price_changes: list[dict] = []
 
+    scraped_ids: set[str] = set()
+    active_sources: set[str] = set()
+
     for lot in scraped:
         lid = lot.get("lot_id")
         if not lid:
             continue
         lid = str(lid)
+        scraped_ids.add(lid)
+        if lot.get("source"):
+            active_sources.add(lot["source"])
         new_price = _price_of(lot)
 
         if lid not in updated:
@@ -303,6 +310,15 @@ def merge_scrape(
                                       "old_price": old_price,
                                       "new_price": new_price})
             updated[lid] = entry
+
+    # Purge lots from sources that were scraped but didn't return this lot —
+    # they've been sold or expired.  Sources with zero results are skipped
+    # (treat as scraper failure, not every lot selling at once).
+    if active_sources:
+        updated = {
+            lid: entry for lid, entry in updated.items()
+            if lid in scraped_ids or entry.get("source") not in active_sources
+        }
 
     merged = list(updated.values())
     return merged, new_lots, price_changes, updated
