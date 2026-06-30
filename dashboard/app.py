@@ -503,8 +503,21 @@ if "src_seen_ids" not in st.session_state:
     st.session_state.src_seen_ids = set()
 # Persistent rolling store: {lot_id: listing}. Loaded once per session so the
 # table is repopulated from disk on browser refresh without re-scraping.
+def _valid_lot(l: dict) -> bool:
+    """Return False for lots that are almost certainly mis-parsed."""
+    ha = l.get("hectares")
+    price = l.get("auction_price")
+    if ha is not None and ha < 0.4:
+        return False
+    if ha and price and price / ha < 100:
+        return False
+    return True
+
 if "listings_store" not in st.session_state:
-    st.session_state.listings_store: dict[str, dict] = load_store()
+    raw_store = load_store()
+    st.session_state.listings_store: dict[str, dict] = {
+        lid: l for lid, l in raw_store.items() if _valid_lot(l)
+    }
 if "all_listings" not in st.session_state:
     st.session_state.all_listings = list(st.session_state.listings_store.values())
 # Last-search summary — reload the persisted delta so the new-lots / price-
