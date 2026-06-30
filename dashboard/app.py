@@ -897,6 +897,18 @@ def _run_batch(active_sources: list[str], apify_token: str) -> None:
     # every source, since all listings flow through here before display.
     new_raw = [l for l in new_raw if l.get("hectares") is not None and l["hectares"] >= 0.4]
 
+    # Drop lots where price-per-hectare < 100 R$/ha — this is a near-certain signal
+    # that the hectares value is wrong (e.g. m²→ha mis-conversion producing a
+    # 5 000 ha farm priced at 10 R$/ha).  Real rural land in Brazil never trades
+    # below ~1 000 R$/ha; 100 R$/ha is a very conservative floor.
+    new_raw = [
+        l for l in new_raw
+        if not (
+            l.get("hectares") and l.get("auction_price")
+            and l["auction_price"] / l["hectares"] < 100
+        )
+    ]
+
     if not new_raw:
         return
 
